@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pitch Discrimination Experiment – Multiplicative & QUEST Staircase</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Full-page layout, no scrolling */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+
+    .screen {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: none;
+    }
+    .centered-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    button {
+      font-size: 1rem;
+      margin: 10px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+
+    /* ===== Trial Screen Layout ===== */
+    #trialScreen {
+      display: none;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background-color: #fff;
+    }
+    /* A small bar at the top to display "Trial n/10" (in real experiment) */
+    #trialCounter {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 40px;
+      line-height: 40px;
+      background-color: #ddd;
+      text-align: center;
+      font-weight: bold;
+      display: none; /* hidden by default, shown only in real experiment */
+    }
+    /* Horizontal line at 50% of the screen height */
+    #horizontalLine {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background-color: black;
+      top: 50%; 
+      margin: 0;
+      padding: 0;
+    }
+    /* Top half => Higher (with arrow) */
+    #higherArea {
+      position: absolute;
+      top: 40px; /* below the trialCounter bar */
+      left: 0;
+      width: 100%;
+      height: calc(50% - 40px);
+      background-color: #eef;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
+    }
+    /* Bottom half => Lower (with arrow) */
+    #lowerArea {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 50%;
+      background-color: #fee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<!-- =============== 1. Intro Screen =============== -->
+<div id="introScreen" class="screen">
+  <div class="centered-content">
+    <h1>Pitch Discrimination Experiment</h1>
+    <p>
+      You will hear two tones in quick succession.<br>
+      Decide if the <strong>second tone</strong> is higher (<strong>↑</strong>) or lower (<strong>↓</strong>) than the first.<br><br>
+      - <strong>Keyboard</strong>: Up Arrow = Higher, Down Arrow = Lower<br>
+      - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
+      First, you'll do <strong>test trials</strong> (with an easy large difference).<br>
+      Once you get 5 correct, you'll start the <strong>real experiment</strong> in batches of 10 trials,<br>
+      using a <strong>multiplicative</strong> adaptive procedure.
+    </p>
+    <button id="startTestBtn">Start Test Trials</button>
+    <br>
+    <p>Or skip test trials by uploading a previous experiment data file:</p>
+    <button id="uploadBtn">Upload Previous Data & Skip Test</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none;" />
+  </div>
+</div>
+
+<!-- =============== 2. Trial Screen =============== -->
+<div id="trialScreen" class="screen">
+  <div id="trialCounter"></div>
+  <div id="horizontalLine"></div>
+  <div id="higherArea">HIGHER ↑</div>
+  <div id="lowerArea">LOWER ↓</div>
+</div>
+
+<!-- =============== 3. Test Complete Screen =============== -->
+<div id="testCompleteScreen" class="screen">
+  <div class="centered-content">
+    <h1>Test Complete!</h1>
+    <p>
+      You have reached 5 correct answers in the test trials.<br>
+      Now the real experiment will begin, using a multiplicative staircase.<br>
+      After each trial, the frequency difference is multiplied by a factor based on correctness.<br><br>
+      Click or press <strong>Enter</strong> to continue.
+    </p>
+    <button id="startRealBtn">Continue</button>
+  </div>
+</div>
+
+<!-- =============== 4. Batch End Screen (10 Trials) =============== -->
+<div id="batchEndScreen" class="screen">
+  <div class="centered-content">
+    <h1>Batch Complete</h1>
+    <p>
+      You have finished 10 trials in this batch.<br>
+      Press <strong>Enter</strong> (or click below) to continue,<br>
+      or press <strong>Esc</strong> (or click below) to stop.
+    </p>
+    <button id="continueBtn">Continue (Enter)</button>
+    <button id="stopBtn">Stop (Esc)</button>
+  </div>
+</div>
+
+<!-- =============== 5. Final Screen =============== -->
+<div id="finalScreen" class="screen">
+  <div class="centered-content">
+    <h1>Experiment Ended</h1>
+    <p>Thank you for participating!</p>
+    <button id="downloadBtn">Download Data</button>
+  </div>
+</div>
+
+<script>
+/* ===========================
+   0. Global Parameters
+=========================== */
+/* Test trials: need 5 correct at a fixed large difference. */
+let isTestMode = false;
+const NEEDED_TEST_CORRECT = 5;
+let testCorrectCount = 0;
+
+/* Multiplicative staircase for real experiment with 75% threshold target */
+let currentDiffSemitones = 12; // Start big for test; will reset for real
+const FACTOR_CORRECT = 0.7071;  // Approx 1/√2 for 75% target
+const FACTOR_WRONG   = 1.4142;  // Approx √2 for 75% target
+const MIN_DIFF_SEMITONES = 1e-5;
+const MAX_DIFF_SEMITONES = 24;
+
+/* Simplified QUEST-like parameters */
+let questEstimate = 4;           // initial threshold guess in semitones
+let questStep = 2;               // initial step size
+const MIN_QUEST_STEP = 0.1;      // minimum step size for refinement
+
+/* Batches: 10 trials each in real experiment */
+const TRIALS_PER_BATCH = 10;
+let batchNumber = 0;
+let trialNumberInBatch = 0;
+
+/* Sound timing & random base freq constraints */
+let audioContext;
+const MIN_BASE_FREQ = 220;
+const MAX_BASE_FREQ = 880;
+const TONE_DURATION = 0.25;
+const MIN_GAP_MS    = 250;
+const MAX_GAP_MS    = 2000;
+
+let baseFrequency;
+let secondFrequency;
+let isSecondHigher;
+let firstSoundStartTime = 0;
+let secondSoundStartTime = 0;
+
+/* Data storage */
+let trialData = [];
+
+/* ===========================
+   1. Utility: semitones->ratio
+=========================== */
+function semitonesToRatio(semitones) {
+  return Math.pow(2, semitones / 12);
+}
+
+/* Create or reuse AudioContext, play sine tone */
+function playTone(freq, durationSec) {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const osc = audioContext.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+
+  const gain = audioContext.createGain();
+  gain.gain.setValueAtTime(0, audioContext.currentTime);
+  gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.01);
+  gain.gain.setValueAtTime(1, audioContext.currentTime + durationSec - 0.01);
+  gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + durationSec);
+
+  osc.connect(gain).connect(audioContext.destination);
+  osc.start();
+  osc.stop(audioContext.currentTime + durationSec);
+}
+
+/* ===========================
+   2. Test Trials
+=========================== */
+function startTestTrials() {
+  isTestMode = true;
+  testCorrectCount = 0;
+  currentDiffSemitones = 12; // large difference for easier test
+  runTestTrial();
+}
+
+function runTestTrial() {
+  switchScreen('trialScreen');
+  hideTrialCounter(true);
+
+  baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
+  isSecondHigher = (Math.random() < 0.5);
+
+  let ratio = semitonesToRatio(currentDiffSemitones);
+  if (!isSecondHigher) ratio = 1 / ratio;
+  let candidateFreq = baseFrequency * ratio;
+  candidateFreq = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, candidateFreq));
+  secondFrequency = candidateFreq;
+
+  setTimeout(() => {
+    firstSoundStartTime = performance.now();
+    playTone(baseFrequency, TONE_DURATION);
+    const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
+    setTimeout(() => {
+      secondSoundStartTime = performance.now();
+      playTone(secondFrequency, TONE_DURATION);
+    }, gap);
+  }, 300);
+}
+
+/* ===========================
+   3. Real Experiment in Batches
+=========================== */
+function startRealExperiment() {
+  isTestMode = false;
+  // Use the QUEST estimate for starting difference
+  currentDiffSemitones = questEstimate;
+  batchNumber = 0;
+  startNewBatch();
+}
+
+function startNewBatch() {
+  batchNumber++;
+  trialNumberInBatch = 0;
+  runNextRealTrial();
+}
+
+function runNextRealTrial() {
+  trialNumberInBatch++;
+  switchScreen('trialScreen');
+  hideTrialCounter(false);
+  updateTrialCounter(trialNumberInBatch, TRIALS_PER_BATCH);
+
+  baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
+  isSecondHigher = (Math.random() < 0.5);
+  let ratio = semitonesToRatio(currentDiffSemitones);
+  if (!isSecondHigher) ratio = 1 / ratio;
+  let candidateFreq = baseFrequency * ratio;
+  candidateFreq = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, candidateFreq));
+  secondFrequency = candidateFreq;
+
+  setTimeout(() => {
+    firstSoundStartTime = performance.now();
+    playTone(baseFrequency, TONE_DURATION);
+    const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
+    setTimeout(() => {
+      secondSoundStartTime = performance.now();
+      playTone(secondFrequency, TONE_DURATION);
+    }, gap);
+  }, 300);
+}
+
+/* ===========================
+   4. Handle Response with Multiplicative & Simplified QUEST Update
+=========================== */
+function handleResponse(userSaysHigher) {
+  const now = performance.now();
+  const reactionTimeMs = now - secondSoundStartTime;
+  const correct = (userSaysHigher === isSecondHigher);
+  const gapDurationMs = secondSoundStartTime - firstSoundStartTime;
+
+  // Save data
+  trialData.push({
+    timestamp: new Date().toISOString(),
+    isTestMode,
+    batchNumber: isTestMode ? 0 : batchNumber,
+    trialInBatch: isTestMode ? 0 : trialNumberInBatch,
+    firstPitchHz: baseFrequency,
+    secondPitchHz: secondFrequency,
+    gapDurationMs: gapDurationMs.toFixed(2),
+    relativeDiffSemitones: currentDiffSemitones,
+    userResponse: userSaysHigher ? "higher" : "lower",
+    correctness: correct,
+    reactionTimeMs: reactionTimeMs.toFixed(2)
+  });
+
+  if (isTestMode) {
+    if (correct) {
+      testCorrectCount++;
+      alert(`Correct! (${testCorrectCount}/${NEEDED_TEST_CORRECT})`);
+    } else {
+      alert(`Wrong! (${testCorrectCount}/${NEEDED_TEST_CORRECT} so far)`);
+    }
+    if (testCorrectCount >= NEEDED_TEST_CORRECT) {
+      switchScreen('testCompleteScreen');
+    } else {
+      runTestTrial();
+    }
+  } else {
+    // Multiplicative adjustment aiming at 75%
+    if (correct) {
+      currentDiffSemitones *= FACTOR_CORRECT;
+    } else {
+      currentDiffSemitones *= FACTOR_WRONG;
+    }
+    currentDiffSemitones = Math.max(MIN_DIFF_SEMITONES, Math.min(MAX_DIFF_SEMITONES, currentDiffSemitones));
+
+    // Simplified QUEST-like update:
+    if (correct) {
+      questEstimate = Math.max(questEstimate - questStep, MIN_DIFF_SEMITONES);
+    } else {
+      questEstimate = Math.min(questEstimate + questStep, MAX_DIFF_SEMITONES);
+    }
+    // Gradually shrink the quest step as more trials occur
+    questStep = Math.max(questStep * 0.95, MIN_QUEST_STEP);
+
+    if (trialNumberInBatch >= TRIALS_PER_BATCH) {
+      switchScreen('batchEndScreen');
+    } else {
+      runNextRealTrial();
+    }
+  }
+}
+
+/* ===========================
+   5. Trial Counter Utility
+=========================== */
+function hideTrialCounter(shouldHide) {
+  const tc = document.getElementById('trialCounter');
+  tc.style.display = shouldHide ? "none" : "block";
+}
+function updateTrialCounter(current, total) {
+  const tc = document.getElementById('trialCounter');
+  tc.textContent = `Trial ${current} / ${total}`;
+}
+
+/* ===========================
+   6. Screen Switching
+=========================== */
+function switchScreen(screenId) {
+  const allScreens = [
+    'introScreen',
+    'trialScreen',
+    'testCompleteScreen',
+    'batchEndScreen',
+    'finalScreen'
+  ];
+  allScreens.forEach(id => {
+    document.getElementById(id).style.display = (id === screenId) ? 'block' : 'none';
+  });
+}
+
+/* ===========================
+   7. Download Data
+=========================== */
+function downloadData() {
+  const dataStr = JSON.stringify(trialData, null, 2);
+  const blob = new Blob([dataStr], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'experiment_data.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ===========================
+   8. File Upload Handler
+=========================== */
+document.getElementById('uploadBtn').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const loadedData = JSON.parse(e.target.result);
+      if (Array.isArray(loadedData)) {
+        trialData = loadedData.concat(trialData);
+      } else {
+        alert('Invalid data format in JSON file.');
+        return;
+      }
+      startRealExperiment();
+    } catch (err) {
+      alert('Error parsing JSON file: ' + err);
+    }
+  };
+  reader.readAsText(file);
+});
+
+/* ===========================
+   9. Event Listeners
+=========================== */
+// Intro
+document.getElementById('startTestBtn').addEventListener('click', () => {
+  trialData = [];
+  startTestTrials();
+});
+
+// Test Complete
+document.getElementById('startRealBtn').addEventListener('click', () => {
+  startRealExperiment();
+});
+
+// Batch End
+document.getElementById('continueBtn').addEventListener('click', () => {
+  startNewBatch();
+});
+document.getElementById('stopBtn').addEventListener('click', () => {
+  switchScreen('finalScreen');
+});
+
+// Final
+document.getElementById('downloadBtn').addEventListener('click', downloadData);
+
+// Trial Screen: top => higher, bottom => lower
+document.getElementById('higherArea').addEventListener('click', () => {
+  handleResponse(true);
+});
+document.getElementById('lowerArea').addEventListener('click', () => {
+  handleResponse(false);
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
+  const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
+  const testCompleteVisible = (document.getElementById('testCompleteScreen').style.display === 'block');
+
+  if(trialVisible) {
+    if(e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleResponse(true);
+    } else if(e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleResponse(false);
+    }
+  } 
+  else if(batchEndVisible) {
+    if(e.key === 'Enter') {
+      e.preventDefault();
+      startNewBatch();
+    } else if(e.key === 'Escape') {
+      e.preventDefault();
+      switchScreen('finalScreen');
+    }
+  }
+  else if(testCompleteVisible) {
+    if(e.key === 'Enter') {
+      e.preventDefault();
+      startRealExperiment();
+    }
+  }
+});
+
+// Show the Intro screen initially
+switchScreen('introScreen');
+</script>
+</body>
+</html>
