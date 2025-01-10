@@ -76,7 +76,7 @@
       left: 0;
       width: 100%;
       height: calc(50% - 40px);
-      background-color: #eef;
+      background-color: gray;  /* Initially gray */
       display: flex;
       align-items: center;
       justify-content: center;
@@ -90,7 +90,7 @@
       left: 0;
       width: 100%;
       height: 50%;
-      background-color: #fee;
+      background-color: gray;  /* Initially gray */
       display: flex;
       align-items: center;
       justify-content: center;
@@ -112,7 +112,8 @@
       - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
       First, you'll do <strong>test trials</strong> (with an easy large difference).<br>
       Once you get 5 correct, you'll start the <strong>real experiment</strong> in batches of 10 trials,<br>
-      using an <strong>adaptive</strong> procedure that updates the difficulty range after each batch.
+      using an <strong>adaptive</strong> procedure that updates the difficulty range after each batch.<br>
+      <strong>Note:</strong> You can only respond <em>after</em> the second tone has started playing.
     </p>
     <button id="startTestBtn">Start Test Trials</button>
     <br>
@@ -193,13 +194,15 @@ let isSecondHigher;
 let firstSoundStartTime = 0;
 let secondSoundStartTime = 0;
 
+/* To ignore user responses until second tone onset */
+let canRespond = false;
+
+/* The data structure for all trials (test + real) */
 let trialData = [];
 
 /* Range boundaries for selecting next semitone (log-based selection).
-   Because semitones are themselves a logarithmic measure of pitch ratio,
-   we are effectively picking from a "log-of-logs" space. 
-   For typical experiments, user-defined min=0.1, max=24 might be adjusted,
-   but let's keep it more moderate. */
+   We'll clamp any picked difference to >= 0.001.
+*/
 let lowBound = 1;    // lower semitone limit
 let highBound = 12;  // upper semitone limit
 
@@ -207,7 +210,9 @@ let highBound = 12;  // upper semitone limit
    1. Utility: semitones->ratio
 =========================== */
 function semitonesToRatio(semitones) {
-  return Math.pow(2, semitones / 12);
+  // semitones could be positive or negative, but we only compute ratio from its magnitude 
+  // if isSecondHigher is false, we invert it later by 1/ratio.
+  return Math.pow(2, Math.abs(semitones) / 12);
 }
 
 /* Create or reuse AudioContext, play sine tone */
@@ -243,13 +248,18 @@ function runTestTrial() {
   switchScreen('trialScreen');
   hideTrialCounter(true);
 
+  // Display "HIGHER"/"LOWER" in gray, ignore responses until second tone onset
+  prepareResponseAreasForNextTrial();
+
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
   isSecondHigher = (Math.random() < 0.5);
 
   // Use a large difference for easy test
   const testDiff = 12;
   let ratio = semitonesToRatio(testDiff);
+  // If second is lower, invert ratio
   if (!isSecondHigher) ratio = 1 / ratio;
+
   let candidateFreq = baseFrequency * ratio;
   candidateFreq = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, candidateFreq));
   secondFrequency = candidateFreq;
@@ -258,9 +268,12 @@ function runTestTrial() {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
     const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
+
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
+      // Now user can respond
+      enableResponseAreas();
     }, gap);
   }, 300);
 }
@@ -270,7 +283,7 @@ function runTestTrial() {
 =========================== */
 function startRealExperiment() {
   isTestMode = false;
-  // Recompute bounds based on data if we have enough
+  // If enough data from previous trials, recompute
   if (trialData.filter(t => !t.isTestMode).length > 5) {
     computeRange();
   } else {
@@ -294,30 +307,40 @@ function runNextRealTrial() {
   hideTrialCounter(false);
   updateTrialCounter(trialNumberInBatch, TRIALS_PER_BATCH);
 
+  // Display "HIGHER"/"LOWER" in gray, ignore responses until second tone
+  prepareResponseAreasForNextTrial();
+
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
   isSecondHigher = (Math.random() < 0.5);
 
   // Pick a random semitone in log space between lowBound and highBound
   let randomSemitone;
-  if (lowBound < highBound) {
-    const logLow = Math.log10(lowBound);
-    const logHigh = Math.log10(highBound);
-    const randomLog = logLow + Math.random() * (logHigh - logHigh < 0 ? 0 : (logHigh - logLow));
-    // Safeguard in case logLow > logHigh due to inverted bounds
+  const absLow = Math.max(0.001, Math.abs(lowBound));
+  const absHigh = Math.max(0.001, Math.abs(highBound));
+
+  if (absLow < absHigh) {
+    const logLow = Math.log10(absLow);
+    const logHigh = Math.log10(absHigh);
     if (logHigh > logLow) {
       const randomLog = logLow + Math.random() * (logHigh - logLow);
       randomSemitone = Math.pow(10, randomLog);
     } else {
-      // fallback if something is off with the logs
-      randomSemitone = (lowBound + highBound) / 2;
+      // fallback if logs are flipped or identical
+      randomSemitone = (absLow + absHigh) / 2;
     }
   } else {
     // fallback if bounds are invalid or insufficient data
-    randomSemitone = (lowBound + highBound) / 2;
+    randomSemitone = (absLow + absHigh) / 2;
   }
 
-  const ratio = semitonesToRatio(randomSemitone);
-  secondFrequency = baseFrequency * (isSecondHigher ? ratio : 1 / ratio);
+  // clamp to 0.001 min
+  randomSemitone = Math.max(0.001, randomSemitone);
+
+  // Convert semitones -> ratio, then invert if second is lower
+  let ratio = semitonesToRatio(randomSemitone);
+  if (!isSecondHigher) ratio = 1 / ratio;
+
+  secondFrequency = baseFrequency * ratio;
   secondFrequency = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, secondFrequency));
 
   setTimeout(() => {
@@ -327,6 +350,8 @@ function runNextRealTrial() {
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
+      // Now user can respond
+      enableResponseAreas();
     }, gap);
   }, 300);
 }
@@ -335,12 +360,21 @@ function runNextRealTrial() {
    4. Handle Response and Batch Update
 =========================== */
 function handleResponse(userSaysHigher) {
+  if (!canRespond) {
+    // Ignore response if user tries to answer too early
+    return;
+  }
+
   const now = performance.now();
   const reactionTimeMs = now - secondSoundStartTime;
   const correct = (userSaysHigher === isSecondHigher);
   const gapDurationMs = secondSoundStartTime - firstSoundStartTime;
 
-  const currentDiffSemitones = getCurrentSemitones(); // Helper to look up last ratio
+  // The actual semitone difference used is the absolute difference 
+  // between secondFrequency and baseFrequency in semitones:
+  const ratio = secondFrequency / baseFrequency;
+  const usedSemitone = 12 * (Math.log(ratio) / Math.log(2));
+
   trialData.push({
     timestamp: new Date().toISOString(),
     isTestMode,
@@ -349,7 +383,8 @@ function handleResponse(userSaysHigher) {
     firstPitchHz: baseFrequency,
     secondPitchHz: secondFrequency,
     gapDurationMs: gapDurationMs.toFixed(2),
-    relativeDiffSemitones: currentDiffSemitones,
+    // We store the absolute value so it's consistent with the log sampling approach
+    relativeDiffSemitones: Math.max(0.001, Math.abs(usedSemitone)),
     userResponse: userSaysHigher ? "higher" : "lower",
     correctness: correct,
     reactionTimeMs: reactionTimeMs.toFixed(2)
@@ -378,16 +413,28 @@ function handleResponse(userSaysHigher) {
   }
 }
 
-// Helper function to get the last used semitone difference from secondFrequency/baseFrequency
-function getCurrentSemitones() {
-  // ratio = secondFrequency / baseFrequency
-  const ratio = secondFrequency / baseFrequency;
-  // semitones = 12 * log2(ratio)
-  return 12 * (Math.log(ratio) / Math.log(2));
+/* ===========================
+   4B. Helpers for disabling and enabling response
+=========================== */
+function prepareResponseAreasForNextTrial() {
+  canRespond = false;
+  const higherArea = document.getElementById('higherArea');
+  const lowerArea = document.getElementById('lowerArea');
+  higherArea.style.backgroundColor = 'gray';
+  lowerArea.style.backgroundColor = 'gray';
+}
+
+function enableResponseAreas() {
+  canRespond = true;
+  const higherArea = document.getElementById('higherArea');
+  const lowerArea = document.getElementById('lowerArea');
+  // Original color scheme:
+  higherArea.style.backgroundColor = '#eef';
+  lowerArea.style.backgroundColor = '#fee';
 }
 
 /* ===========================
-   Compute Range for Next Trials
+   5. Compute Range for Next Trials
 =========================== */
 function computeRange() {
   const data = trialData.filter(trial => !trial.isTestMode);
@@ -398,23 +445,32 @@ function computeRange() {
     return;
   }
   
-  // Get sorted unique semitone differences from the data
-  let values = [...new Set(data.map(t => t.relativeDiffSemitones))];
+  // Get sorted unique semitone differences from the data (absolute)
+  let values = [...new Set(data.map(t => Math.abs(t.relativeDiffSemitones)))];
+  values = values.filter(v => v >= 0.001); // ensure >= 0.001
   values.sort((a,b) => a - b);
 
-  // Initialize boundaries
+  if (values.length < 2) {
+    // Edge case: still not enough unique values
+    lowBound = 1;
+    highBound = 12;
+    return;
+  }
+
   let potentialLow = null;
   let potentialHigh = null;
   
-  // For each unique semitone "val":
-  //   meanA = mean accuracy for all trials with semitones < val
-  //   meanB = mean accuracy for all trials with semitones >= val
-  // We want to find val such that meanA < 0.7 and val' such that meanB > 0.8
-  // to define a range [val, val']
+  // For each unique semitone "v":
+  //   meanA = mean accuracy for all trials with semitones < v
+  //   meanB = mean accuracy for all trials with semitones >= v
+  // We want to find v s.t. meanA < 0.7, and v' s.t. meanB > 0.8
+  // so we define a range [v, v'].
   for (let v of values) {
-    const below = data.filter(t => t.relativeDiffSemitones < v);
-    const meanA = below.length ? below.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / below.length : 0;
-    if(meanA < 0.7) {
+    const below = data.filter(t => Math.abs(t.relativeDiffSemitones) < v);
+    const meanA = below.length 
+      ? below.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / below.length 
+      : 0;
+    if (meanA < 0.7) {
       potentialLow = v;
       break;
     }
@@ -422,9 +478,11 @@ function computeRange() {
 
   for (let i = values.length - 1; i >= 0; i--) {
     const v = values[i];
-    const above = data.filter(t => t.relativeDiffSemitones >= v);
-    const meanB = above.length ? above.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / above.length : 0;
-    if(meanB > 0.8) {
+    const above = data.filter(t => Math.abs(t.relativeDiffSemitones) >= v);
+    const meanB = above.length
+      ? above.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / above.length
+      : 0;
+    if (meanB > 0.8) {
       potentialHigh = v;
       break;
     }
@@ -432,17 +490,16 @@ function computeRange() {
 
   // Update global lowBound, highBound
   if(potentialLow !== null && potentialHigh !== null && potentialLow < potentialHigh) {
-    lowBound = Math.max(potentialLow, 0.0001); // avoid log10(0)
-    highBound = Math.max(potentialHigh, lowBound + 0.0001); // ensure highBound > lowBound
+    lowBound = Math.max(0.001, potentialLow);
+    highBound = Math.max(lowBound + 0.0001, potentialHigh); // ensure highBound >= lowBound
   } else {
-    // If no valid range found, fallback
     lowBound = 1;
     highBound = 12;
   }
 }
 
 /* ===========================
-   5. Trial Counter Utility
+   6. Trial Counter Utility
 =========================== */
 function hideTrialCounter(shouldHide) {
   const tc = document.getElementById('trialCounter');
@@ -454,7 +511,7 @@ function updateTrialCounter(current, total) {
 }
 
 /* ===========================
-   6. Screen Switching
+   7. Screen Switching
 =========================== */
 function switchScreen(screenId) {
   const allScreens = [
@@ -470,7 +527,7 @@ function switchScreen(screenId) {
 }
 
 /* ===========================
-   7. Download Data
+   8. Download Data
 =========================== */
 function downloadData() {
   const dataStr = JSON.stringify(trialData, null, 2);
@@ -484,7 +541,7 @@ function downloadData() {
 }
 
 /* ===========================
-   8. File Upload Handler
+   9. File Upload Handler
 =========================== */
 document.getElementById('uploadBtn').addEventListener('click', () => {
   document.getElementById('fileInput').click();
@@ -513,7 +570,7 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
 });
 
 /* ===========================
-   9. Event Listeners
+   10. Event Listeners
 =========================== */
 // Intro
 document.getElementById('startTestBtn').addEventListener('click', () => {
