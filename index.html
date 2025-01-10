@@ -279,8 +279,8 @@ function runTestTrial() {
 =========================== */
 function startRealExperiment() {
   isTestMode = false;
-  // Use the QUEST estimate for starting difference
-  currentDiffSemitones = questEstimate;
+  // Use the QUEST estimate (updated from previous data if available) for starting difference
+  currentDiffSemitones = questEstimate || 4;  
   batchNumber = 0;
   startNewBatch();
 }
@@ -356,17 +356,13 @@ function handleResponse(userSaysHigher) {
     // Multiplicative adjustment aiming at 75%
     if (correct) {
       currentDiffSemitones *= FACTOR_CORRECT;
+      questEstimate = Math.max(questEstimate - questStep, MIN_DIFF_SEMITONES);
     } else {
       currentDiffSemitones *= FACTOR_WRONG;
+      questEstimate = Math.min(questEstimate + questStep, MAX_DIFF_SEMITONES);
     }
     currentDiffSemitones = Math.max(MIN_DIFF_SEMITONES, Math.min(MAX_DIFF_SEMITONES, currentDiffSemitones));
 
-    // Simplified QUEST-like update:
-    if (correct) {
-      questEstimate = Math.max(questEstimate - questStep, MIN_DIFF_SEMITONES);
-    } else {
-      questEstimate = Math.min(questEstimate + questStep, MAX_DIFF_SEMITONES);
-    }
     // Gradually shrink the quest step as more trials occur
     questStep = Math.max(questStep * 0.95, MIN_QUEST_STEP);
 
@@ -436,7 +432,18 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
     try {
       const loadedData = JSON.parse(e.target.result);
       if (Array.isArray(loadedData)) {
+        // Combine previously saved data with current trialData
         trialData = loadedData.concat(trialData);
+
+        // Extract semitone differences from correct responses
+        const correctTrials = loadedData.filter(d => d.correctness === true && d.relativeDiffSemitones);
+        if(correctTrials.length > 0) {
+          const semitoneDiffs = correctTrials.map(d => d.relativeDiffSemitones).sort((a, b) => a - b);
+          const mid = Math.floor(semitoneDiffs.length / 2);
+          questEstimate = (semitoneDiffs.length % 2 !== 0) 
+                        ? semitoneDiffs[mid] 
+                        : (semitoneDiffs[mid - 1] + semitoneDiffs[mid]) / 2;
+        }
       } else {
         alert('Invalid data format in JSON file.');
         return;
