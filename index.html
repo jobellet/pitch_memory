@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Adaptive Staircase</title>
+  <title>Pitch Discrimination Experiment – Adaptive Staircase (Log-Sampling)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     /* Full-page layout, no scrolling */
@@ -112,7 +112,7 @@
       - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
       First, you'll do <strong>test trials</strong> (with an easy large difference).<br>
       Once you get 5 correct, you'll start the <strong>real experiment</strong> in batches of 10 trials,<br>
-      using an <strong>adaptive staircase</strong> procedure.
+      using an <strong>adaptive</strong> procedure that updates the difficulty range after each batch.
     </p>
     <button id="startTestBtn">Start Test Trials</button>
     <br>
@@ -136,8 +136,9 @@
     <h1>Test Complete!</h1>
     <p>
       You have reached 5 correct answers in the test trials.<br>
-      Now the real experiment will begin, using an adaptive staircase.<br>
-      After each batch of trials, the difficulty will be updated based on your performance.<br><br>
+      Now the real experiment will begin using a log-spaced adaptive procedure.<br>
+      After each batch of 10 trials, the difficulty range updates,<br>
+      and new tone differences will be sampled uniformly in log space between the identified bounds.<br><br>
       Click or press <strong>Enter</strong> to continue.
     </p>
     <button id="startRealBtn">Continue</button>
@@ -194,9 +195,13 @@ let secondSoundStartTime = 0;
 
 let trialData = [];
 
-/* Range boundaries for selecting next semitone */
-let lowBound = 1;   // default lower bound in semitones
-let highBound = 12; // default upper bound in semitones
+/* Range boundaries for selecting next semitone (log-based selection).
+   Because semitones are themselves a logarithmic measure of pitch ratio,
+   we are effectively picking from a "log-of-logs" space. 
+   For typical experiments, user-defined min=0.1, max=24 might be adjusted,
+   but let's keep it more moderate. */
+let lowBound = 1;    // lower semitone limit
+let highBound = 12;  // upper semitone limit
 
 /* ===========================
    1. Utility: semitones->ratio
@@ -205,7 +210,7 @@ function semitonesToRatio(semitones) {
   return Math.pow(2, semitones / 12);
 }
 
-/* Play tone utility */
+/* Create or reuse AudioContext, play sine tone */
 function playTone(freq, durationSec) {
   if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -241,8 +246,8 @@ function runTestTrial() {
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
   isSecondHigher = (Math.random() < 0.5);
 
-  // Use a large difference for ease during test trials
-  let testDiff = 12;
+  // Use a large difference for easy test
+  const testDiff = 12;
   let ratio = semitonesToRatio(testDiff);
   if (!isSecondHigher) ratio = 1 / ratio;
   let candidateFreq = baseFrequency * ratio;
@@ -265,12 +270,13 @@ function runTestTrial() {
 =========================== */
 function startRealExperiment() {
   isTestMode = false;
-  // Initialize boundaries based on available data or defaults
-  if(trialData.length < 5) {
+  // Recompute bounds based on data if we have enough
+  if (trialData.filter(t => !t.isTestMode).length > 5) {
+    computeRange();
+  } else {
+    // Keep defaults
     lowBound = 1;
     highBound = 12;
-  } else {
-    computeRange();
   }
   batchNumber = 0;
   startNewBatch();
@@ -291,21 +297,28 @@ function runNextRealTrial() {
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
   isSecondHigher = (Math.random() < 0.5);
 
-  // Choose semitone difference randomly within computed bounds
+  // Pick a random semitone in log space between lowBound and highBound
   let randomSemitone;
-  if(lowBound < highBound) {
-    randomSemitone = lowBound + Math.random() * (highBound - lowBound);
+  if (lowBound < highBound) {
+    const logLow = Math.log10(lowBound);
+    const logHigh = Math.log10(highBound);
+    const randomLog = logLow + Math.random() * (logHigh - logHigh < 0 ? 0 : (logHigh - logLow));
+    // Safeguard in case logLow > logHigh due to inverted bounds
+    if (logHigh > logLow) {
+      const randomLog = logLow + Math.random() * (logHigh - logLow);
+      randomSemitone = Math.pow(10, randomLog);
+    } else {
+      // fallback if something is off with the logs
+      randomSemitone = (lowBound + highBound) / 2;
+    }
   } else {
-    // If bounds are invalid, fallback to a default value
+    // fallback if bounds are invalid or insufficient data
     randomSemitone = (lowBound + highBound) / 2;
   }
-  currentDiffSemitones = randomSemitone;
 
-  let ratio = semitonesToRatio(currentDiffSemitones);
-  if (!isSecondHigher) ratio = 1 / ratio;
-  let candidateFreq = baseFrequency * ratio;
-  candidateFreq = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, candidateFreq));
-  secondFrequency = candidateFreq;
+  const ratio = semitonesToRatio(randomSemitone);
+  secondFrequency = baseFrequency * (isSecondHigher ? ratio : 1 / ratio);
+  secondFrequency = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, secondFrequency));
 
   setTimeout(() => {
     firstSoundStartTime = performance.now();
@@ -327,6 +340,7 @@ function handleResponse(userSaysHigher) {
   const correct = (userSaysHigher === isSecondHigher);
   const gapDurationMs = secondSoundStartTime - firstSoundStartTime;
 
+  const currentDiffSemitones = getCurrentSemitones(); // Helper to look up last ratio
   trialData.push({
     timestamp: new Date().toISOString(),
     isTestMode,
@@ -354,14 +368,22 @@ function handleResponse(userSaysHigher) {
       runTestTrial();
     }
   } else {
-    // If batch complete, update range
     if (trialNumberInBatch >= TRIALS_PER_BATCH) {
+      // After each batch, update the range
       computeRange();
       switchScreen('batchEndScreen');
     } else {
       runNextRealTrial();
     }
   }
+}
+
+// Helper function to get the last used semitone difference from secondFrequency/baseFrequency
+function getCurrentSemitones() {
+  // ratio = secondFrequency / baseFrequency
+  const ratio = secondFrequency / baseFrequency;
+  // semitones = 12 * log2(ratio)
+  return 12 * (Math.log(ratio) / Math.log(2));
 }
 
 /* ===========================
@@ -376,15 +398,19 @@ function computeRange() {
     return;
   }
   
-  // Get sorted unique semitone differences from data
+  // Get sorted unique semitone differences from the data
   let values = [...new Set(data.map(t => t.relativeDiffSemitones))];
   values.sort((a,b) => a - b);
-  
+
   // Initialize boundaries
   let potentialLow = null;
   let potentialHigh = null;
   
-  // Find the lowest semitone where mean accuracy below that < 0.7
+  // For each unique semitone "val":
+  //   meanA = mean accuracy for all trials with semitones < val
+  //   meanB = mean accuracy for all trials with semitones >= val
+  // We want to find val such that meanA < 0.7 and val' such that meanB > 0.8
+  // to define a range [val, val']
   for (let v of values) {
     const below = data.filter(t => t.relativeDiffSemitones < v);
     const meanA = below.length ? below.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / below.length : 0;
@@ -393,8 +419,7 @@ function computeRange() {
       break;
     }
   }
-  
-  // Find the highest semitone where mean accuracy at or above that > 0.8
+
   for (let i = values.length - 1; i >= 0; i--) {
     const v = values[i];
     const above = data.filter(t => t.relativeDiffSemitones >= v);
@@ -404,15 +429,15 @@ function computeRange() {
       break;
     }
   }
-  
-  // Update bounds if valid range found
+
+  // Update global lowBound, highBound
   if(potentialLow !== null && potentialHigh !== null && potentialLow < potentialHigh) {
-    lowBound = potentialLow;
-    highBound = potentialHigh;
+    lowBound = Math.max(potentialLow, 0.0001); // avoid log10(0)
+    highBound = Math.max(potentialHigh, lowBound + 0.0001); // ensure highBound > lowBound
   } else {
-    // If no valid range found, broaden search using defaults or previous values
-    lowBound = lowBound || 1;
-    highBound = highBound || 12;
+    // If no valid range found, fallback
+    lowBound = 1;
+    highBound = 12;
   }
 }
 
