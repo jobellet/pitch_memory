@@ -2,100 +2,65 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Adaptive Staircase (Log-Sampling)</title>
+  <title>Pitch Discrimination Experiment – Robust Log-Sampling Staircase</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     /* Full-page layout, no scrolling */
     html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
       font-family: sans-serif;
       overflow: hidden;
     }
     .screen {
       position: relative;
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       display: none;
     }
     .centered-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
       text-align: center;
-      width: 100%;
-      height: 100%;
-      padding: 20px;
-      box-sizing: border-box;
+      width: 100%; height: 100%;
+      padding: 20px; box-sizing: border-box;
     }
     button {
-      font-size: 1rem;
-      margin: 10px;
-      padding: 10px 20px;
+      font-size: 1rem; margin: 10px; padding: 10px 20px;
       cursor: pointer;
     }
+
     /* ===== Trial Screen Layout ===== */
     #trialScreen {
-      display: none;
       position: relative;
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       background-color: #fff;
-    }
-    /* A small bar at the top to display "Trial n/10" (in real experiment) */
-    #trialCounter {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 40px;
-      line-height: 40px;
-      background-color: #ddd;
-      text-align: center;
-      font-weight: bold;
       display: none;
     }
-    /* Horizontal line at 50% of the screen height */
+    #trialCounter {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 40px; line-height: 40px;
+      background-color: #ddd; text-align: center;
+      font-weight: bold; display: none;
+    }
     #horizontalLine {
-      position: absolute;
-      left: 0;
-      width: 100%;
-      height: 2px;
-      background-color: black;
-      top: 50%; 
-      margin: 0;
-      padding: 0;
+      position: absolute; left: 0; width: 100%; height: 2px;
+      background-color: black; top: 50%;
+      margin: 0; padding: 0;
     }
-    /* Top half => Higher (with arrow) */
+    #higherArea, #lowerArea {
+      width: 100%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; cursor: pointer;
+    }
     #higherArea {
-      position: absolute;
-      top: 40px;
-      left: 0;
-      width: 100%;
+      position: absolute; top: 40px; left: 0;
       height: calc(50% - 40px);
-      background-color: gray;  /* Initially gray */
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 2rem;
-      cursor: pointer;
+      background-color: gray; /* initially disabled (gray) */
     }
-    /* Bottom half => Lower (with arrow) */
     #lowerArea {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      width: 100%;
+      position: absolute; bottom: 0; left: 0;
       height: 50%;
-      background-color: gray;  /* Initially gray */
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 2rem;
-      cursor: pointer;
+      background-color: gray; /* initially disabled (gray) */
     }
   </style>
 </head>
@@ -107,18 +72,19 @@
     <h1>Pitch Discrimination Experiment</h1>
     <p>
       You will hear two tones in quick succession.<br>
-      Decide if the <strong>second tone</strong> is higher (<strong>↑</strong>) or lower (<strong>↓</strong>) than the first.<br><br>
+      Decide if the <strong>second tone</strong> is higher (<strong>↑</strong>) 
+      or lower (<strong>↓</strong>) than the first.<br><br>
       - <strong>Keyboard</strong>: Up Arrow = Higher, Down Arrow = Lower<br>
       - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
       First, you'll do <strong>test trials</strong> (with an easy large difference).<br>
       Once you get 5 correct, you'll start the <strong>real experiment</strong> in batches of 10 trials,<br>
-      using an <strong>adaptive</strong> procedure that updates the difficulty range after each batch.<br>
-      <strong>Note:</strong> You can only respond <em>after</em> the second tone has started playing.
+      using an <em>adaptive</em> procedure that updates the pitch-difference range after each batch.<br>
+      We only allow responses after the <strong>second tone</strong> has started playing.
     </p>
     <button id="startTestBtn">Start Test Trials</button>
     <br>
     <p>Or skip test trials by uploading a previous experiment data file:</p>
-    <button id="uploadBtn">Upload Previous Data & Skip Test</button>
+    <button id="uploadBtn">Upload Previous Data &amp; Skip Test</button>
     <input type="file" id="fileInput" accept=".json" style="display:none;" />
   </div>
 </div>
@@ -137,10 +103,9 @@
     <h1>Test Complete!</h1>
     <p>
       You have reached 5 correct answers in the test trials.<br>
-      Now the real experiment will begin using a log-spaced adaptive procedure.<br>
-      After each batch of 10 trials, the difficulty range updates,<br>
-      and new tone differences will be sampled uniformly in log space between the identified bounds.<br><br>
-      Click or press <strong>Enter</strong> to continue.
+      Now the real experiment will begin with a <strong>robust log-sampling staircase</strong>.<br>
+      After each batch of 10 trials, we use <em>all your past data</em> to refine the difficulty range,<br>
+      seeking intervals around ~70–80% correct.
     </p>
     <button id="startRealBtn">Continue</button>
   </div>
@@ -177,42 +142,47 @@ let isTestMode = false;
 const NEEDED_TEST_CORRECT = 5;
 let testCorrectCount = 0;
 
+/* Real Experiment in 10-trial batches */
 const TRIALS_PER_BATCH = 10;
 let batchNumber = 0;
 let trialNumberInBatch = 0;
 
+/* Audio & Tone constraints */
 let audioContext;
 const MIN_BASE_FREQ = 220;
 const MAX_BASE_FREQ = 880;
-const TONE_DURATION = 0.25;
+const TONE_DURATION = 0.25; // seconds
 const MIN_GAP_MS    = 250;
 const MAX_GAP_MS    = 2000;
 
-let baseFrequency;
-let secondFrequency;
-let isSecondHigher;
+let baseFrequency = 440;
+let secondFrequency = 660;
+let isSecondHigher = true;
 let firstSoundStartTime = 0;
 let secondSoundStartTime = 0;
 
-/* To ignore user responses until second tone onset */
+/* We disable user responses until the second tone starts playing */
 let canRespond = false;
 
-/* The data structure for all trials (test + real) */
+/* Data for all trials (test + real) */
 let trialData = [];
 
-/* Range boundaries for selecting next semitone (log-based selection).
-   We'll clamp any picked difference to >= 0.001.
-*/
-let lowBound = 1;    // lower semitone limit
-let highBound = 12;  // upper semitone limit
+/* Range boundaries for the next log-based semitone selection.
+   We always clamp to >= 0.001 semitone. */
+let lowBound = 1;   // semitones
+let highBound = 12; // semitones
+
+/* We require at least MIN_SAMPLES in each bin for below/above */
+const MIN_SAMPLES = 5;
 
 /* ===========================
    1. Utility: semitones->ratio
 =========================== */
 function semitonesToRatio(semitones) {
-  // semitones could be positive or negative, but we only compute ratio from its magnitude 
-  // if isSecondHigher is false, we invert it later by 1/ratio.
-  return Math.pow(2, Math.abs(semitones) / 12);
+  // We use absolute semitones for ratio 
+  // If second is lower, we invert ratio later
+  const absSemitones = Math.abs(semitones);
+  return Math.pow(2, absSemitones / 12);
 }
 
 /* Create or reuse AudioContext, play sine tone */
@@ -248,21 +218,18 @@ function runTestTrial() {
   switchScreen('trialScreen');
   hideTrialCounter(true);
 
-  // Display "HIGHER"/"LOWER" in gray, ignore responses until second tone onset
-  prepareResponseAreasForNextTrial();
+  // Gray out the response areas & ignore clicks
+  prepareResponseAreas();
 
-  baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
+  baseFrequency = randomBaseFreq();
   isSecondHigher = (Math.random() < 0.5);
 
-  // Use a large difference for easy test
-  const testDiff = 12;
-  let ratio = semitonesToRatio(testDiff);
-  // If second is lower, invert ratio
+  // Large difference for easy test
+  const testDiffSemitone = 12;
+  let ratio = semitonesToRatio(testDiffSemitone);
   if (!isSecondHigher) ratio = 1 / ratio;
 
-  let candidateFreq = baseFrequency * ratio;
-  candidateFreq = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, candidateFreq));
-  secondFrequency = candidateFreq;
+  secondFrequency = clampFreq(baseFrequency * ratio);
 
   setTimeout(() => {
     firstSoundStartTime = performance.now();
@@ -272,6 +239,7 @@ function runTestTrial() {
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
+
       // Now user can respond
       enableResponseAreas();
     }, gap);
@@ -283,11 +251,10 @@ function runTestTrial() {
 =========================== */
 function startRealExperiment() {
   isTestMode = false;
-  // If enough data from previous trials, recompute
+  // Attempt to refine from existing data if we have enough
   if (trialData.filter(t => !t.isTestMode).length > 5) {
     computeRange();
   } else {
-    // Keep defaults
     lowBound = 1;
     highBound = 12;
   }
@@ -307,17 +274,16 @@ function runNextRealTrial() {
   hideTrialCounter(false);
   updateTrialCounter(trialNumberInBatch, TRIALS_PER_BATCH);
 
-  // Display "HIGHER"/"LOWER" in gray, ignore responses until second tone
-  prepareResponseAreasForNextTrial();
+  prepareResponseAreas();
 
-  baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
+  baseFrequency = randomBaseFreq();
   isSecondHigher = (Math.random() < 0.5);
 
-  // Pick a random semitone in log space between lowBound and highBound
-  let randomSemitone;
+  // Pick random semitone from [lowBound, highBound] in log space
   const absLow = Math.max(0.001, Math.abs(lowBound));
   const absHigh = Math.max(0.001, Math.abs(highBound));
 
+  let randomSemitone;
   if (absLow < absHigh) {
     const logLow = Math.log10(absLow);
     const logHigh = Math.log10(absHigh);
@@ -325,66 +291,60 @@ function runNextRealTrial() {
       const randomLog = logLow + Math.random() * (logHigh - logLow);
       randomSemitone = Math.pow(10, randomLog);
     } else {
-      // fallback if logs are flipped or identical
-      randomSemitone = (absLow + absHigh) / 2;
+      // fallback if logs are inverted
+      randomSemitone = (absLow + absHigh)/2;
     }
   } else {
-    // fallback if bounds are invalid or insufficient data
-    randomSemitone = (absLow + absHigh) / 2;
+    // fallback if bounds are invalid
+    randomSemitone = (absLow + absHigh)/2;
   }
 
-  // clamp to 0.001 min
   randomSemitone = Math.max(0.001, randomSemitone);
 
-  // Convert semitones -> ratio, then invert if second is lower
   let ratio = semitonesToRatio(randomSemitone);
   if (!isSecondHigher) ratio = 1 / ratio;
 
-  secondFrequency = baseFrequency * ratio;
-  secondFrequency = Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, secondFrequency));
+  secondFrequency = clampFreq(baseFrequency * ratio);
 
   setTimeout(() => {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
+
     const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
-      // Now user can respond
       enableResponseAreas();
     }, gap);
   }, 300);
 }
 
 /* ===========================
-   4. Handle Response and Batch Update
+   4. Handle Response, Store Data
 =========================== */
 function handleResponse(userSaysHigher) {
-  if (!canRespond) {
-    // Ignore response if user tries to answer too early
-    return;
-  }
+  // If user tries to respond too early, ignore
+  if (!canRespond) return;
 
   const now = performance.now();
   const reactionTimeMs = now - secondSoundStartTime;
   const correct = (userSaysHigher === isSecondHigher);
-  const gapDurationMs = secondSoundStartTime - firstSoundStartTime;
+  const gapDurationMs = (secondSoundStartTime - firstSoundStartTime);
 
-  // The actual semitone difference used is the absolute difference 
-  // between secondFrequency and baseFrequency in semitones:
+  // Actual semitone difference used in this trial
   const ratio = secondFrequency / baseFrequency;
   const usedSemitone = 12 * (Math.log(ratio) / Math.log(2));
+  const absSem = Math.max(0.001, Math.abs(usedSemitone));
 
   trialData.push({
     timestamp: new Date().toISOString(),
-    isTestMode,
+    isTestMode: isTestMode,
     batchNumber: isTestMode ? 0 : batchNumber,
     trialInBatch: isTestMode ? 0 : trialNumberInBatch,
     firstPitchHz: baseFrequency,
     secondPitchHz: secondFrequency,
     gapDurationMs: gapDurationMs.toFixed(2),
-    // We store the absolute value so it's consistent with the log sampling approach
-    relativeDiffSemitones: Math.max(0.001, Math.abs(usedSemitone)),
+    relativeDiffSemitones: absSem, // store absolute semitone
     userResponse: userSaysHigher ? "higher" : "lower",
     correctness: correct,
     reactionTimeMs: reactionTimeMs.toFixed(2)
@@ -404,8 +364,7 @@ function handleResponse(userSaysHigher) {
     }
   } else {
     if (trialNumberInBatch >= TRIALS_PER_BATCH) {
-      // After each batch, update the range
-      computeRange();
+      computeRange(); 
       switchScreen('batchEndScreen');
     } else {
       runNextRealTrial();
@@ -414,112 +373,121 @@ function handleResponse(userSaysHigher) {
 }
 
 /* ===========================
-   4B. Helpers for disabling and enabling response
-=========================== */
-function prepareResponseAreasForNextTrial() {
-  canRespond = false;
-  const higherArea = document.getElementById('higherArea');
-  const lowerArea = document.getElementById('lowerArea');
-  higherArea.style.backgroundColor = 'gray';
-  lowerArea.style.backgroundColor = 'gray';
-}
-
-function enableResponseAreas() {
-  canRespond = true;
-  const higherArea = document.getElementById('higherArea');
-  const lowerArea = document.getElementById('lowerArea');
-  // Original color scheme:
-  higherArea.style.backgroundColor = '#eef';
-  lowerArea.style.backgroundColor = '#fee';
-}
-
-/* ===========================
-   5. Compute Range for Next Trials
+   5. "Neuroscientist" Strategy: 
+      More robust computeRange()
 =========================== */
 function computeRange() {
-  const data = trialData.filter(trial => !trial.isTestMode);
-  if(data.length < 5) {
-    // Not enough data: use default range
-    lowBound = 1;
+  const realTrials = trialData.filter(tr => !tr.isTestMode);
+  // If not enough data, keep default
+  if (realTrials.length < 5) {
+    lowBound = 1; 
     highBound = 12;
     return;
   }
-  
-  // Get sorted unique semitone differences from the data (absolute)
-  let values = [...new Set(data.map(t => Math.abs(t.relativeDiffSemitones)))];
-  values = values.filter(v => v >= 0.001); // ensure >= 0.001
-  values.sort((a,b) => a - b);
 
+  // Unique absolute semitone values
+  let values = [...new Set(realTrials.map(t => t.relativeDiffSemitones))];
+  // Filter out anything < 0.001, then sort ascending
+  values = values.filter(v => v >= 0.001).sort((a, b) => a - b);
   if (values.length < 2) {
-    // Edge case: still not enough unique values
     lowBound = 1;
     highBound = 12;
     return;
   }
 
-  let potentialLow = null;
-  let potentialHigh = null;
-  
-  // For each unique semitone "v":
-  //   meanA = mean accuracy for all trials with semitones < v
-  //   meanB = mean accuracy for all trials with semitones >= v
-  // We want to find v s.t. meanA < 0.7, and v' s.t. meanB > 0.8
-  // so we define a range [v, v'].
-  for (let v of values) {
-    const below = data.filter(t => Math.abs(t.relativeDiffSemitones) < v);
-    const meanA = below.length 
-      ? below.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / below.length 
-      : 0;
-    if (meanA < 0.7) {
-      potentialLow = v;
-      break;
-    }
-  }
+  // We'll pick the semitone that yields meanA close to .7, meanB close to .8
+  let bestForLow = null;
+  let bestDistLow = Infinity;
+  let bestForHigh = null;
+  let bestDistHigh = Infinity;
 
-  for (let i = values.length - 1; i >= 0; i--) {
-    const v = values[i];
-    const above = data.filter(t => Math.abs(t.relativeDiffSemitones) >= v);
-    const meanB = above.length
-      ? above.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0) / above.length
-      : 0;
-    if (meanB > 0.8) {
-      potentialHigh = v;
-      break;
+  // For each semitone "v", define:
+  //   below = trials with diff < v
+  //   above = trials with diff >= v
+  // Then compute meanA (accuracy for below), meanB (accuracy for above),
+  // ignoring bins with < MIN_SAMPLES.
+
+  for (let v of values) {
+    const below = realTrials.filter(t => t.relativeDiffSemitones < v);
+    const above = realTrials.filter(t => t.relativeDiffSemitones >= v);
+
+    // Only compute means if enough samples
+    let meanA = null, meanB = null;
+    
+    if (below.length >= MIN_SAMPLES) {
+      let sumCorrectA = below.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0);
+      meanA = sumCorrectA / below.length;
+    }
+    if (above.length >= MIN_SAMPLES) {
+      let sumCorrectB = above.reduce((sum, t) => sum + (t.correctness ? 1 : 0), 0);
+      meanB = sumCorrectB / above.length;
+    }
+
+    // If meanA is valid, see how close it is to 0.7
+    if (meanA !== null) {
+      const dist = Math.abs(meanA - 0.7);
+      if (dist < bestDistLow) {
+        bestDistLow = dist;
+        bestForLow = v;
+      }
+    }
+
+    // If meanB is valid, see how close it is to 0.8
+    if (meanB !== null) {
+      const dist = Math.abs(meanB - 0.8);
+      if (dist < bestDistHigh) {
+        bestDistHigh = dist;
+        bestForHigh = v;
+      }
     }
   }
 
   // Update global lowBound, highBound
-  if(potentialLow !== null && potentialHigh !== null && potentialLow < potentialHigh) {
-    lowBound = Math.max(0.001, potentialLow);
-    highBound = Math.max(lowBound + 0.0001, potentialHigh); // ensure highBound >= lowBound
+  // We only accept if bestForLow < bestForHigh
+  if (bestForLow !== null && bestForHigh !== null && bestForLow < bestForHigh) {
+    lowBound = Math.max(0.001, bestForLow);
+    highBound = Math.max(lowBound + 0.0001, bestForHigh);
   } else {
+    // fallback if we can't find a stable range
     lowBound = 1;
     highBound = 12;
   }
 }
 
 /* ===========================
-   6. Trial Counter Utility
+   6. UI Utility
 =========================== */
-function hideTrialCounter(shouldHide) {
-  const tc = document.getElementById('trialCounter');
-  tc.style.display = shouldHide ? "none" : "block";
+function randomBaseFreq() {
+  return Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
 }
-function updateTrialCounter(current, total) {
-  const tc = document.getElementById('trialCounter');
-  tc.textContent = `Trial ${current} / ${total}`;
+function clampFreq(freq) {
+  return Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, freq));
 }
 
-/* ===========================
-   7. Screen Switching
-=========================== */
+function prepareResponseAreas() {
+  canRespond = false;
+  document.getElementById('higherArea').style.backgroundColor = 'gray';
+  document.getElementById('lowerArea').style.backgroundColor = 'gray';
+}
+
+function enableResponseAreas() {
+  canRespond = true;
+  document.getElementById('higherArea').style.backgroundColor = '#eef';
+  document.getElementById('lowerArea').style.backgroundColor = '#fee';
+}
+
+/* Trial counter & screen switching */
+function hideTrialCounter(shouldHide) {
+  document.getElementById('trialCounter').style.display = shouldHide ? 'none' : 'block';
+}
+function updateTrialCounter(current, total) {
+  document.getElementById('trialCounter').textContent = `Trial ${current} / ${total}`;
+}
+
 function switchScreen(screenId) {
   const allScreens = [
-    'introScreen',
-    'trialScreen',
-    'testCompleteScreen',
-    'batchEndScreen',
-    'finalScreen'
+    'introScreen', 'trialScreen', 'testCompleteScreen',
+    'batchEndScreen', 'finalScreen'
   ];
   allScreens.forEach(id => {
     document.getElementById(id).style.display = (id === screenId) ? 'block' : 'none';
@@ -527,7 +495,7 @@ function switchScreen(screenId) {
 }
 
 /* ===========================
-   8. Download Data
+   7. Download Data
 =========================== */
 function downloadData() {
   const dataStr = JSON.stringify(trialData, null, 2);
@@ -541,7 +509,7 @@ function downloadData() {
 }
 
 /* ===========================
-   9. File Upload Handler
+   8. File Upload Handler
 =========================== */
 document.getElementById('uploadBtn').addEventListener('click', () => {
   document.getElementById('fileInput').click();
@@ -550,12 +518,12 @@ document.getElementById('uploadBtn').addEventListener('click', () => {
 document.getElementById('fileInput').addEventListener('change', (event) => {
   const file = event.target.files[0];
   if (!file) return;
-  
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
       const loadedData = JSON.parse(e.target.result);
       if (Array.isArray(loadedData)) {
+        // Combine with current data
         trialData = loadedData.concat(trialData);
       } else {
         alert('Invalid data format in JSON file.');
@@ -570,7 +538,7 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
 });
 
 /* ===========================
-   10. Event Listeners
+   9. Event Listeners
 =========================== */
 // Intro
 document.getElementById('startTestBtn').addEventListener('click', () => {
@@ -594,7 +562,7 @@ document.getElementById('stopBtn').addEventListener('click', () => {
 // Final
 document.getElementById('downloadBtn').addEventListener('click', downloadData);
 
-// Trial Screen: top => higher, bottom => lower
+/* Trial Screen: top => higher, bottom => lower */
 document.getElementById('higherArea').addEventListener('click', () => {
   handleResponse(true);
 });
@@ -602,39 +570,42 @@ document.getElementById('lowerArea').addEventListener('click', () => {
   handleResponse(false);
 });
 
-// Keyboard shortcuts
+// Keyboard controls
 document.addEventListener('keydown', (e) => {
   const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
   const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
   const testCompleteVisible = (document.getElementById('testCompleteScreen').style.display === 'block');
 
-  if(trialVisible) {
-    if(e.key === 'ArrowUp') {
+  // Only handle arrow keys on the trial screen
+  if (trialVisible) {
+    if (e.key === 'ArrowUp') {
       e.preventDefault();
       handleResponse(true);
-    } else if(e.key === 'ArrowDown') {
+    } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       handleResponse(false);
     }
-  } 
-  else if(batchEndVisible) {
-    if(e.key === 'Enter') {
+  }
+  // Batch End
+  else if (batchEndVisible) {
+    if (e.key === 'Enter') {
       e.preventDefault();
       startNewBatch();
-    } else if(e.key === 'Escape') {
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       switchScreen('finalScreen');
     }
   }
-  else if(testCompleteVisible) {
-    if(e.key === 'Enter') {
+  // Test Complete
+  else if (testCompleteVisible) {
+    if (e.key === 'Enter') {
       e.preventDefault();
       startRealExperiment();
     }
   }
 });
 
-// Show the Intro screen initially
+// Show Intro screen initially
 switchScreen('introScreen');
 </script>
 </body>
