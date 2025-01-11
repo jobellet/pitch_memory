@@ -1,76 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Responsive Buttons with Logistic Fit</title>
+  <meta charset="UTF-8">
+  <title>Pitch Discrimination Experiment – Gray Horizontal Bar, White Buttons</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     /* Full-page layout, no scrolling */
     html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
+      margin: 0; 
+      padding: 0;
+      width: 100%;
+      height: 100%;
       font-family: sans-serif;
       overflow: hidden;
     }
     .screen {
       position: relative;
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       display: none;
     }
     .centered-content {
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       text-align: center;
-      width: 100%; height: 100%;
-      padding: 20px; box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+      box-sizing: border-box;
     }
     button {
-      font-size: 1rem; margin: 10px; padding: 10px 20px;
+      font-size: 1rem;
+      margin: 10px;
+      padding: 10px 20px;
       cursor: pointer;
     }
-
+    
     /* ===== Trial Screen Layout ===== */
     #trialScreen {
       position: relative;
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       background-color: #fff;
       display: none;
     }
     #trialCounter {
       position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 40px;
+      top: 0; 
+      left: 0;
+      width: 100%; 
+      height: 40px;
       line-height: 40px;
       background-color: #ddd;
       text-align: center;
       font-weight: bold;
       display: none;
     }
-    #higherArea, #lowerArea {
+    
+    /* A thin or thick boundary at 50% of screen height, always gray */
+    #horizontalLine {
+      position: absolute;
+      left: 0;
       width: 100%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 2rem; cursor: pointer;
-      background-color: #fff; /* white background */
+      height: 4px;  /* thickness of the line */
+      top: 50%; 
+      margin: 0; 
+      padding: 0;
+      background-color: gray;
+      pointer-events: none; /* don't block clicks */
+      z-index: 10;
     }
+    
+    /* Top half => "HIGHER" */
     #higherArea {
       position: absolute;
-      top: 40px; left: 0;
-      /* adjust height to leave space for border */
+      top: 40px; 
+      left: 0;
+      width: 100%;
       height: calc(50% - 40px);
-      /* thick gray border-bottom initially */
-      border-bottom: 6px solid gray;
+      background-color: #fff;  /* White */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
     }
+    /* Bottom half => "LOWER" */
     #lowerArea {
       position: absolute;
-      top: calc(50% + 3px); /* leave space for border from above area */
+      bottom: 0; 
       left: 0;
-      height: calc(50% - 3px);
+      width: 100%;
+      height: 50%;
+      background-color: #fff;  /* White */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
 
-<!-- =============== Intro Screen =============== -->
+<!-- =============== 1. Intro Screen =============== -->
 <div id="introScreen" class="screen">
   <div class="centered-content">
     <h1>Pitch Discrimination Experiment</h1>
@@ -83,25 +118,26 @@
       For the first 50 trials, we pick the semitone difference from 0.01 to 1, 
       uniformly in log10 space.<br>
       After 50 trials, we fit a logistic curve, then only test intervals 
-      where predicted accuracy is 70–80%.<br>
+      where predicted accuracy is 70–80%. 
       This region is recalculated after every 10 additional trials.
     </p>
     <button id="startBtn">Start Experiment</button>
     <br>
     <p>Or upload a previous dataset (JSON):</p>
     <button id="uploadBtn">Upload Data</button>
-    <input type="file" id="fileInput" accept=".json" style="display:none;" />
+    <input type="file" id="fileInput" accept=".json" style="display:none;">
   </div>
 </div>
 
-<!-- =============== Trial Screen =============== -->
+<!-- =============== 2. Trial Screen =============== -->
 <div id="trialScreen" class="screen">
   <div id="trialCounter"></div>
+  <div id="horizontalLine"></div>
   <div id="higherArea">HIGHER ↑</div>
   <div id="lowerArea">LOWER ↓</div>
 </div>
 
-<!-- =============== Batch Complete Screen =============== -->
+<!-- =============== 3. Batch Complete Screen =============== -->
 <div id="batchEndScreen" class="screen">
   <div class="centered-content">
     <h1>Batch Complete</h1>
@@ -115,7 +151,7 @@
   </div>
 </div>
 
-<!-- =============== Final Screen =============== -->
+<!-- =============== 4. Final Screen =============== -->
 <div id="finalScreen" class="screen">
   <div class="centered-content">
     <h1>Experiment Ended</h1>
@@ -135,7 +171,10 @@ const MAX_BASE_FREQ = 880;
 const MIN_GAP_MS = 250;
 const MAX_GAP_MS = 2000;
 
+// For the first 50 trials => random .01–1 semitones (log10).
 const FREE_EXPLORATION_COUNT = 50;
+
+// After 50 trials => logistic fit each time we finish 10 more trials
 const TRIALS_PER_BATCH = 10;
 
 let trialNumber = 0;     
@@ -149,11 +188,14 @@ let firstSoundStartTime = 0;
 let secondSoundStartTime = 0;
 let canRespond = false;
 
+// Data
 let trialData = [];
 
+// Logistic curve parameters
 let alphaFit = -1;   
 let betaFit  = 0.5;  
 
+// Range of semitones after logistic fit. We'll find the region for [0.7..0.8].
 let lowSemitoneRange = 0.01;
 let highSemitoneRange = 1.0;
 
@@ -179,17 +221,20 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
     try {
       const loadedData = JSON.parse(e.target.result);
       if (Array.isArray(loadedData)) {
+        // Combine loaded data with any existing data
         trialData = loadedData.concat(trialData);
-        if(trialData.length > FREE_EXPLORATION_COUNT) {
+
+        // If we now have >50 trials => fit logistic immediately
+        if (trialData.length > FREE_EXPLORATION_COUNT) {
           fitLogisticAndUpdateRange();
         }
+        
         trialNumber = trialData.length;
         trialNumberInBatch = trialNumber % TRIALS_PER_BATCH;
         batchNumber = Math.floor(trialNumber / TRIALS_PER_BATCH);
         startTrial();
       } else {
         alert('Invalid JSON format.');
-        return;
       }
     } catch (err) {
       alert('Error parsing JSON: ' + err);
@@ -198,8 +243,12 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
   reader.readAsText(file);
 });
 
-document.getElementById('continueBtn').addEventListener('click', startNewBatch);
-document.getElementById('stopBtn').addEventListener('click', () => switchScreen('finalScreen'));
+document.getElementById('continueBtn').addEventListener('click', () => {
+  startNewBatch();
+});
+document.getElementById('stopBtn').addEventListener('click', () => {
+  switchScreen('finalScreen');
+});
 document.getElementById('downloadBtn').addEventListener('click', downloadData);
 
 /* ===========================
@@ -209,23 +258,29 @@ function startTrial() {
   switchScreen('trialScreen');
   updateTrialCounter(trialNumberInBatch + 1, TRIALS_PER_BATCH);
 
-  // Make boundary gray and disable responses
-  setResponseActive(false);
+  // No responses initially
+  canRespond = false;
 
+  // 1) Choose base freq
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
+
+  // 2) is second tone higher or lower
   isSecondHigher = (Math.random() < 0.5);
 
+  // 3) pick semitone difference
   let absSemitone;
-  if(trialNumber < FREE_EXPLORATION_COUNT) {
+  if (trialNumber < FREE_EXPLORATION_COUNT) {
     absSemitone = pickRandomInLogSpace(0.01, 1);
   } else {
     absSemitone = pickRandomInLogSpace(lowSemitoneRange, highSemitoneRange);
   }
 
+  // 4) compute ratio
   let ratio = Math.pow(2, absSemitone / 12);
   if (!isSecondHigher) ratio = 1 / ratio;
   secondFrequency = clampFreq(baseFrequency * ratio);
 
+  // 5) schedule tone playback
   setTimeout(() => {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
@@ -234,19 +289,22 @@ function startTrial() {
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
-      setResponseActive(true); // enable responses and change border color
+      // now we can respond
+      canRespond = true;
     }, gap);
   }, 300);
 }
 
+/** Handle user response */
 function handleResponse(userSaysHigher) {
-  if(!canRespond) return;
+  if (!canRespond) return;
 
   const now = performance.now();
   const correct = (userSaysHigher === isSecondHigher);
   const gapDurationMs = (secondSoundStartTime - firstSoundStartTime).toFixed(2);
   const reactionTimeMs = (now - secondSoundStartTime).toFixed(2);
 
+  // compute actual used semitone (abs)
   const ratio = secondFrequency / baseFrequency;
   const usedSemitone = 12 * (Math.log(ratio) / Math.log(2));
   const absSem = Math.max(0.00001, Math.abs(usedSemitone));
@@ -268,8 +326,9 @@ function handleResponse(userSaysHigher) {
   trialNumber++;
   trialNumberInBatch++;
 
-  if(trialNumberInBatch >= TRIALS_PER_BATCH) {
-    if(trialNumber >= FREE_EXPLORATION_COUNT) {
+  if (trialNumberInBatch >= TRIALS_PER_BATCH) {
+    // if >50 trials => refit logistic
+    if (trialNumber >= FREE_EXPLORATION_COUNT) {
       fitLogisticAndUpdateRange();
     }
     switchScreen('batchEndScreen');
@@ -289,32 +348,34 @@ function startNewBatch() {
 =========================== */
 function fitLogisticAndUpdateRange() {
   const data = trialData;
-  if(data.length < 10) return;
+  if (data.length < 10) return;
 
+  // Build arrays for x=log10(sem), y=correct
   const xs = [];
   const ys = [];
-  for(let d of data) {
+  for (let d of data) {
     const sem = d.relativeDiffSemitones;
-    if(sem > 0) {
+    if (sem > 0) {
       xs.push(Math.log10(sem));
       ys.push(d.correctness ? 1 : 0);
     }
   }
-  if(xs.length < 10) return;
+  if (xs.length < 10) return;
 
+  // naive grid search
   let bestAlpha = -1;
   let bestBeta = 0.5;
   let bestSSE = 1e9;
 
-  for(let alpha = -3; alpha <= 0; alpha += 0.05) {
-    for(let beta = 0.05; beta <= 1.0; beta += 0.05) {
+  for (let alpha = -3; alpha <= 0; alpha += 0.05) {
+    for (let beta = 0.05; beta <= 1.0; beta += 0.05) {
       let sse = 0;
-      for(let i=0; i<xs.length; i++){
+      for (let i = 0; i < xs.length; i++){
         const pred = logistic(xs[i], alpha, beta);
         const diff = (pred - ys[i]);
         sse += diff * diff;
       }
-      if(sse < bestSSE) {
+      if (sse < bestSSE) {
         bestSSE = sse;
         bestAlpha = alpha;
         bestBeta = beta;
@@ -325,11 +386,12 @@ function fitLogisticAndUpdateRange() {
   alphaFit = bestAlpha;
   betaFit  = bestBeta;
 
+  // find [0.7..0.8] range
   let leftBound = 0.01;
   let rightBound = 1.0;
 
   let candidateX = [];
-  for(let logx=-3; logx<=0.3; logx+=0.01) {
+  for (let logx = -3; logx <= 0.3; logx += 0.01) {
     candidateX.push(logx);
   }
 
@@ -338,7 +400,7 @@ function fitLogisticAndUpdateRange() {
     return (p >= 0.7 && p <= 0.8);
   });
 
-  if(validXs.length > 0) {
+  if (validXs.length > 0) {
     leftBound = Math.pow(10, Math.min(...validXs));
     rightBound = Math.pow(10, Math.max(...validXs));
   } else {
@@ -351,6 +413,7 @@ function fitLogisticAndUpdateRange() {
 }
 
 function logistic(x, alpha, beta) {
+  // logistic bounded [0.5..1]
   return 0.5 + 0.5 / (1 + Math.exp(-(x - alpha)/beta));
 }
 function clampRange(v) {
@@ -358,19 +421,9 @@ function clampRange(v) {
 }
 
 /* ===========================
-   4. Utility Functions
+   4. UI, Audio, Etc
 =========================== */
-function setResponseActive(state) {
-  canRespond = state;
-  const higherArea = document.getElementById('higherArea');
-  // Change border-bottom color of higherArea to indicate active response phase
-  if(state) {
-    higherArea.style.borderBottomColor = 'black';
-  } else {
-    higherArea.style.borderBottomColor = 'gray';
-  }
-}
-
+/* Return a random number in [minVal, maxVal], uniform in log10 */
 function pickRandomInLogSpace(minVal, maxVal) {
   const logMin = Math.log10(minVal);
   const logMax = Math.log10(maxVal);
@@ -384,20 +437,19 @@ function clampFreq(freq) {
 }
 
 function switchScreen(screenId) {
-  const allScreens = ['introScreen', 'trialScreen', 'batchEndScreen', 'finalScreen'];
+  const allScreens = ['introScreen','trialScreen','batchEndScreen','finalScreen'];
   allScreens.forEach(id => {
     document.getElementById(id).style.display = (id === screenId) ? 'block' : 'none';
   });
 }
-
 function updateTrialCounter(current, total) {
   const tc = document.getElementById('trialCounter');
-  tc.style.display = "block";
+  tc.style.display = 'block';
   tc.textContent = `Trial ${current} / ${total}`;
 }
 
 function playTone(freq, durationSec) {
-  if(!audioContext) {
+  if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
   }
   const osc = audioContext.createOscillator();
@@ -415,9 +467,10 @@ function playTone(freq, durationSec) {
   osc.stop(audioContext.currentTime + durationSec);
 }
 
+/* Download Data */
 function downloadData() {
   const dataStr = JSON.stringify(trialData, null, 2);
-  const blob = new Blob([dataStr], {type: "application/json"});
+  const blob = new Blob([dataStr], {type: 'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -429,29 +482,33 @@ function downloadData() {
 /* Show Intro initially */
 switchScreen('introScreen');
 
-/* Keyboard handling */
+/* Keyboard for trial or batch screen */
 document.addEventListener('keydown', (e) => {
   const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
   const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
 
-  if(trialVisible) {
-    if(e.key === 'ArrowUp') {
+  if (trialVisible) {
+    if (e.key === 'ArrowUp') {
       e.preventDefault();
       handleResponse(true);
-    } else if(e.key === 'ArrowDown') {
+    } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       handleResponse(false);
     }
-  } else if(batchEndVisible) {
-    if(e.key === 'Enter') {
+  } else if (batchEndVisible) {
+    if (e.key === 'Enter') {
       e.preventDefault();
       startNewBatch();
-    } else if(e.key === 'Escape') {
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       switchScreen('finalScreen');
     }
   }
 });
+
+/* The top/bottom areas => onClick => handleResponse(...) */
+document.getElementById('higherArea').addEventListener('click', () => handleResponse(true));
+document.getElementById('lowerArea').addEventListener('click', () => handleResponse(false));
 </script>
 </body>
 </html>
