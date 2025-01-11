@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Pitch Discrimination Experiment – With Training Phase</title>
+  <meta charset="UTF-8" />
+  <title>Pitch Discrimination Experiment – Immediate Logistic Fit on Uploaded Data</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    /* Basic styles remain unchanged from previous code */
+    /* Full-page layout, no scrolling */
     html, body {
       margin: 0; padding: 0;
       width: 100%; height: 100%;
@@ -13,7 +13,7 @@
       overflow: hidden;
     }
     .screen {
-      position: relative;
+      position: relative; 
       width: 100%; height: 100%;
       display: none;
     }
@@ -28,9 +28,13 @@
       font-size: 1rem; margin: 10px; padding: 10px 20px;
       cursor: pointer;
     }
+
+    /* ===== Trial Screen Layout ===== */
     #trialScreen {
-      position: relative; width: 100%; height: 100%;
-      background-color: #fff; display: none;
+      position: relative;
+      width: 100%; height: 100%;
+      background-color: #fff;
+      display: none;
     }
     #trialCounter {
       position: absolute; top: 0; left: 0;
@@ -39,30 +43,29 @@
       font-weight: bold; display: none;
     }
     #horizontalLine {
-      position: absolute; left: 0; width: 100%;
-      height: 4px; top: 50%; margin: 0; padding: 0;
-      background-color: gray; pointer-events: none;
-      z-index: 10;
+      position: absolute; left: 0; width: 100%; height: 2px;
+      background-color: black; top: 50%; margin: 0; padding: 0;
     }
     #higherArea, #lowerArea {
-      width: 100%; display: flex;
-      align-items: center; justify-content: center;
+      width: 100%;
+      display: flex; align-items: center; justify-content: center;
       font-size: 2rem; cursor: pointer;
-      background-color: #fff;
     }
     #higherArea {
       position: absolute; top: 40px; left: 0;
       height: calc(50% - 40px);
+      background-color: gray; /* initially disabled */
     }
     #lowerArea {
       position: absolute; bottom: 0; left: 0;
       height: 50%;
+      background-color: gray; /* initially disabled */
     }
   </style>
 </head>
 <body>
 
-<!-- Intro Screen remains unchanged -->
+<!-- =============== 1. Intro Screen =============== -->
 <div id="introScreen" class="screen">
   <div class="centered-content">
     <h1>Pitch Discrimination Experiment</h1>
@@ -71,20 +74,22 @@
       Decide if the <strong>second tone</strong> is higher (<strong>↑</strong>) 
       or lower (<strong>↓</strong>) than the first.<br><br>
       - <strong>Keyboard</strong>: Up Arrow = Higher, Down Arrow = Lower<br>
-      - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
-      First, you'll undergo <strong>training trials</strong> with an easy pitch difference.<br>
-      You must get 5 correct responses to start the main experiment.<br><br>
-      After training, the experiment will run as described on the screen.
+      - <strong>Touch</strong>: Tap top half for Higher, bottom half for Lower<br><br>
+      <strong>Procedure:</strong><br>
+      - First 50 trials: random semitone in [0.01, 1] (log10 uniform).<br>
+      - Once at least 50 trials are available, we <strong>immediately</strong> fit a logistic curve,<br>
+        and only pick semitones in [0.7–0.8 accuracy] (again uniform in log10).<br>
+      - After <strong>every 10 trials</strong> beyond that, we re-fit the logistic curve.
     </p>
-    <button id="startBtn">Start Training</button>
+    <button id="startBtn">Start Experiment</button>
     <br>
     <p>Or upload a previous dataset (JSON):</p>
     <button id="uploadBtn">Upload Data</button>
-    <input type="file" id="fileInput" accept=".json" style="display:none;">
+    <input type="file" id="fileInput" accept=".json" style="display:none;" />
   </div>
 </div>
 
-<!-- Trial Screen -->
+<!-- =============== 2. Trial Screen =============== -->
 <div id="trialScreen" class="screen">
   <div id="trialCounter"></div>
   <div id="horizontalLine"></div>
@@ -92,7 +97,7 @@
   <div id="lowerArea">LOWER ↓</div>
 </div>
 
-<!-- Batch Complete Screen -->
+<!-- =============== 3. Batch Complete Screen =============== -->
 <div id="batchEndScreen" class="screen">
   <div class="centered-content">
     <h1>Batch Complete</h1>
@@ -106,7 +111,7 @@
   </div>
 </div>
 
-<!-- Final Screen -->
+<!-- =============== 4. Final Screen =============== -->
 <div id="finalScreen" class="screen">
   <div class="centered-content">
     <h1>Experiment Ended</h1>
@@ -116,7 +121,9 @@
 </div>
 
 <script>
-/* Global parameters and styles remain unchanged from previous code */
+/* ===========================
+   0. Global Parameters
+=========================== */
 let audioContext;
 const TONE_DURATION = 0.25;
 const MIN_BASE_FREQ = 220;
@@ -124,10 +131,14 @@ const MAX_BASE_FREQ = 880;
 const MIN_GAP_MS = 250;
 const MAX_GAP_MS = 2000;
 
+// For the first 50 trials => random .01–1 semitones, log10 sampling
 const FREE_EXPLORATION_COUNT = 50;
+
+// After 50 trials => logistic fit each time we complete 10 trials
 const TRIALS_PER_BATCH = 10;
 
-let trialNumber = 0;
+// We store how many total trials have been done
+let trialNumber = 0;     
 let trialNumberInBatch = 0;
 let batchNumber = 0;
 
@@ -138,27 +149,26 @@ let firstSoundStartTime = 0;
 let secondSoundStartTime = 0;
 let canRespond = false;
 
+// Data
 let trialData = [];
-let alphaFit = -1;
-let betaFit = 0.5;
+
+// Our logistic parameters
+let alphaFit = -1;   
+let betaFit  = 0.5;  
+
+// Range of semitones used after fitting: [lowSemitoneRange..highSemitoneRange]
 let lowSemitoneRange = 0.01;
 let highSemitoneRange = 1.0;
 
-/* Training specific parameters */
-const NEEDED_TEST_CORRECT = 5;
-let testCorrectCount = 0;
-let inTrainingPhase = true;  // flag to indicate training vs main phase
-
-/* Setup listeners */
+/* ===========================
+   1. UI Setup
+=========================== */
 document.getElementById('startBtn').addEventListener('click', () => {
-  // Start with training phase
-  inTrainingPhase = true;
-  testCorrectCount = 0;
   trialData = [];
   trialNumber = 0;
   trialNumberInBatch = 0;
   batchNumber = 0;
-  startTestTrial();
+  startTrial();
 });
 
 document.getElementById('uploadBtn').addEventListener('click', () => {
@@ -172,19 +182,24 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
     try {
       const loadedData = JSON.parse(e.target.result);
       if (Array.isArray(loadedData)) {
+        // Merge data
         trialData = loadedData.concat(trialData);
-        // If enough data, fit logistic curve
-        if(trialData.length > FREE_EXPLORATION_COUNT) {
-          fitLogisticAndUpdateRange();
-        }
-        trialNumber = trialData.length;
-        trialNumberInBatch = trialNumber % TRIALS_PER_BATCH;
-        batchNumber = Math.floor(trialNumber / TRIALS_PER_BATCH);
-        inTrainingPhase = false;  // Skip training since data >50
-        startTrial();
       } else {
         alert('Invalid JSON format.');
+        return;
       }
+      // Evaluate how many total trials we have
+      trialNumber = trialData.length;
+      trialNumberInBatch = trialNumber % TRIALS_PER_BATCH;
+      batchNumber = Math.floor(trialNumber / TRIALS_PER_BATCH);
+
+      // If we already have >= 50 trials, do an immediate logistic fit
+      if(trialNumber >= FREE_EXPLORATION_COUNT) {
+        fitLogisticAndUpdateRange();
+      }
+
+      // Start from next trial
+      startTrial();
     } catch (err) {
       alert('Error parsing JSON: ' + err);
     }
@@ -192,65 +207,79 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
   reader.readAsText(file);
 });
 
-document.getElementById('continueBtn').addEventListener('click', startNewBatch);
-document.getElementById('stopBtn').addEventListener('click', () => switchScreen('finalScreen'));
+document.getElementById('continueBtn').addEventListener('click', () => {
+  startNewBatch();
+});
+document.getElementById('stopBtn').addEventListener('click', () => {
+  switchScreen('finalScreen');
+});
 document.getElementById('downloadBtn').addEventListener('click', downloadData);
 
-/* Trial and Response Handlers */
+document.getElementById('higherArea').addEventListener('click', () => handleResponse(true));
+document.getElementById('lowerArea').addEventListener('click', () => handleResponse(false));
 
-function startTestTrial() {
-  switchScreen('trialScreen');
-  updateTrialCounter(testCorrectCount + 1, NEEDED_TEST_CORRECT);
-  canRespond = false;
+document.addEventListener('keydown', (e) => {
+  const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
+  const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
 
-  baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
-  isSecondHigher = (Math.random() < 0.5);
-  let testDiffSemitone = 12; // Easy trial
-  let ratio = Math.pow(2, testDiffSemitone / 12);
-  if (!isSecondHigher) ratio = 1 / ratio;
-  secondFrequency = clampFreq(baseFrequency * ratio);
+  if(trialVisible) {
+    if(e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleResponse(true);
+    } else if(e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleResponse(false);
+    }
+  }
+  else if(batchEndVisible) {
+    if(e.key === 'Enter') {
+      e.preventDefault();
+      startNewBatch();
+    } else if(e.key === 'Escape') {
+      e.preventDefault();
+      switchScreen('finalScreen');
+    }
+  }
+});
 
-  setTimeout(() => {
-    firstSoundStartTime = performance.now();
-    playTone(baseFrequency, TONE_DURATION);
-
-    const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
-    setTimeout(() => {
-      secondSoundStartTime = performance.now();
-      playTone(secondFrequency, TONE_DURATION);
-      canRespond = true;
-    }, gap);
-  }, 300);
-}
-
+/* ===========================
+   2. Trials
+=========================== */
 function startTrial() {
   switchScreen('trialScreen');
-  updateTrialCounter(trialNumberInBatch + 1, TRIALS_PER_BATCH);
-  canRespond = false;
+  updateTrialCounter(trialNumberInBatch+1, TRIALS_PER_BATCH);
 
+  setResponseActive(false);
+
+  // Base freq
   baseFrequency = Math.random() * (MAX_BASE_FREQ - MIN_BASE_FREQ) + MIN_BASE_FREQ;
   isSecondHigher = (Math.random() < 0.5);
 
   let absSemitone;
   if(trialNumber < FREE_EXPLORATION_COUNT) {
+    // first 50 => random in [0.01..1], log10
     absSemitone = pickRandomInLogSpace(0.01, 1);
   } else {
+    // after 50 => use logistic fit range
     absSemitone = pickRandomInLogSpace(lowSemitoneRange, highSemitoneRange);
   }
 
+  // ratio
   let ratio = Math.pow(2, absSemitone / 12);
-  if (!isSecondHigher) ratio = 1 / ratio;
+  if(!isSecondHigher) ratio = 1 / ratio;
+
   secondFrequency = clampFreq(baseFrequency * ratio);
 
+  // play
   setTimeout(() => {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
 
-    const gap = MIN_GAP_MS + Math.random() * (MAX_GAP_MS - MIN_GAP_MS);
+    const gap = MIN_GAP_MS + Math.random()*(MAX_GAP_MS - MIN_GAP_MS);
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
-      canRespond = true;
+      setResponseActive(true);
     }, gap);
   }, 300);
 }
@@ -263,9 +292,10 @@ function handleResponse(userSaysHigher) {
   const gapDurationMs = (secondSoundStartTime - firstSoundStartTime).toFixed(2);
   const reactionTimeMs = (now - secondSoundStartTime).toFixed(2);
 
+  // compute actual used semitone
   const ratio = secondFrequency / baseFrequency;
-  const usedSemitone = 12 * (Math.log(ratio) / Math.log(2));
-  const absSem = Math.max(0.00001, Math.abs(usedSemitone));
+  const usedSem = 12 * (Math.log(ratio) / Math.log(2));
+  const absSem = Math.max(0.00001, Math.abs(usedSem));
 
   trialData.push({
     timestamp: new Date().toISOString(),
@@ -281,31 +311,19 @@ function handleResponse(userSaysHigher) {
     reactionTimeMs: reactionTimeMs
   });
 
-  if(inTrainingPhase) {
-    if(correct) testCorrectCount++;
-    if(testCorrectCount >= NEEDED_TEST_CORRECT) {
-      // Transition to main experiment
-      inTrainingPhase = false;
-      trialNumber = 0;
-      trialNumberInBatch = 0;
-      batchNumber = 0;
-      // Clear trialData or keep it for later analysis - here we keep it.
-      startTrial();
-    } else {
-      startTestTrial();
-    }
-  } else {
-    trialNumber++;
-    trialNumberInBatch++;
+  trialNumber++;
+  trialNumberInBatch++;
 
-    if(trialNumberInBatch >= TRIALS_PER_BATCH) {
-      if(trialNumber >= FREE_EXPLORATION_COUNT) {
-        fitLogisticAndUpdateRange();
-      }
-      switchScreen('batchEndScreen');
-    } else {
-      startTrial();
+  // Check if end of batch
+  if(trialNumberInBatch >= TRIALS_PER_BATCH) {
+    // if beyond 50 trials => re-fit logistic now
+    if(trialNumber >= FREE_EXPLORATION_COUNT) {
+      fitLogisticAndUpdateRange();
     }
+    switchScreen('batchEndScreen');
+  } else {
+    // continue with next trial
+    startTrial();
   }
 }
 
@@ -315,11 +333,14 @@ function startNewBatch() {
   startTrial();
 }
 
-/* Logistic Fit */
+/* ===========================
+   3. Logistic Fit & Range 
+=========================== */
 function fitLogisticAndUpdateRange() {
-  const data = trialData;
-  if(data.length < 10) return;
+  const data = trialData; // all so far
+  if(data.length < 10) return; // not enough data for any meaningful fit
 
+  // collect x=log10(sem), y=correctness
   const xs = [];
   const ys = [];
   for(let d of data) {
@@ -331,6 +352,7 @@ function fitLogisticAndUpdateRange() {
   }
   if(xs.length < 10) return;
 
+  // naive grid search for alpha in [-3..0], beta in [0.05..1], step 0.05
   let bestAlpha = -1;
   let bestBeta = 0.5;
   let bestSSE = 1e9;
@@ -338,10 +360,10 @@ function fitLogisticAndUpdateRange() {
   for(let alpha = -3; alpha <= 0; alpha += 0.05) {
     for(let beta = 0.05; beta <= 1.0; beta += 0.05) {
       let sse = 0;
-      for(let i = 0; i < xs.length; i++){
+      for(let i=0; i<xs.length; i++){
         const pred = logistic(xs[i], alpha, beta);
-        const diff = (pred - ys[i]);
-        sse += diff * diff;
+        const diff = pred - ys[i];
+        sse += diff*diff;
       }
       if(sse < bestSSE) {
         bestSSE = sse;
@@ -354,35 +376,44 @@ function fitLogisticAndUpdateRange() {
   alphaFit = bestAlpha;
   betaFit  = bestBeta;
 
+  // find [0.7..0.8] region
   let leftBound = 0.01;
   let rightBound = 1.0;
   let candidateX = [];
   for(let logx=-3; logx<=0.3; logx+=0.01) {
     candidateX.push(logx);
   }
+
   let validXs = candidateX.filter(xx => {
     const p = logistic(xx, alphaFit, betaFit);
     return (p >= 0.7 && p <= 0.8);
   });
+
   if(validXs.length > 0) {
     leftBound = Math.pow(10, Math.min(...validXs));
-    rightBound = Math.pow(10, Math.max(...validXs));
+    rightBound= Math.pow(10, Math.max(...validXs));
   } else {
+    // fallback
     leftBound = 0.01;
-    rightBound = 1.0;
+    rightBound= 1.0;
   }
-  lowSemitoneRange  = clampRange(leftBound);
-  highSemitoneRange = clampRange(rightBound);
+
+  lowSemitoneRange = clampRange(leftBound);
+  highSemitoneRange= clampRange(rightBound);
 }
 
 function logistic(x, alpha, beta) {
+  // logistic bounded between 0.5 and 1
   return 0.5 + 0.5 / (1 + Math.exp(-(x - alpha)/beta));
 }
+
 function clampRange(v) {
   return Math.min(2.0, Math.max(0.01, v));
 }
 
-/* Utility Functions */
+/* ===========================
+   4. Utility
+=========================== */
 function pickRandomInLogSpace(minVal, maxVal) {
   const logMin = Math.log10(minVal);
   const logMax = Math.log10(maxVal);
@@ -390,9 +421,25 @@ function pickRandomInLogSpace(minVal, maxVal) {
   const randLog = logMin + r*(logMax - logMin);
   return Math.pow(10, randLog);
 }
+
 function clampFreq(freq) {
   return Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, freq));
 }
+
+function setResponseActive(state) {
+  canRespond = state;
+  const higherArea = document.getElementById('higherArea');
+  const lowerArea = document.getElementById('lowerArea');
+  if(state) {
+    higherArea.style.backgroundColor = '#eef';
+    lowerArea.style.backgroundColor = '#fee';
+  } else {
+    higherArea.style.backgroundColor = 'gray';
+    lowerArea.style.backgroundColor = 'gray';
+  }
+}
+
+/* Show/hide screens */
 function switchScreen(screenId) {
   const allScreens = ['introScreen','trialScreen','batchEndScreen','finalScreen'];
   allScreens.forEach(id => {
@@ -401,9 +448,11 @@ function switchScreen(screenId) {
 }
 function updateTrialCounter(current, total) {
   const tc = document.getElementById('trialCounter');
-  tc.style.display = 'block';
+  tc.style.display = "block";
   tc.textContent = `Trial ${current} / ${total}`;
 }
+
+/* Audio: play tone */
 function playTone(freq, durationSec) {
   if(!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -411,18 +460,24 @@ function playTone(freq, durationSec) {
   const osc = audioContext.createOscillator();
   osc.type = 'sine';
   osc.frequency.value = freq;
+
   const gain = audioContext.createGain();
   gain.gain.setValueAtTime(0, audioContext.currentTime);
   gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.01);
   gain.gain.setValueAtTime(1, audioContext.currentTime + durationSec - 0.01);
   gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + durationSec);
+
   osc.connect(gain).connect(audioContext.destination);
   osc.start();
   osc.stop(audioContext.currentTime + durationSec);
 }
+
+/* ===========================
+   5. Download Data
+=========================== */
 function downloadData() {
   const dataStr = JSON.stringify(trialData, null, 2);
-  const blob = new Blob([dataStr], {type: 'application/json'});
+  const blob = new Blob([dataStr], {type: "application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -431,21 +486,7 @@ function downloadData() {
   URL.revokeObjectURL(url);
 }
 
-/* Keyboard handling */
-document.addEventListener('keydown', (e) => {
-  const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
-  const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
-
-  if(trialVisible) {
-    if(e.key === 'ArrowUp') { e.preventDefault(); handleResponse(true); }
-    else if(e.key === 'ArrowDown') { e.preventDefault(); handleResponse(false); }
-  } else if(batchEndVisible) {
-    if(e.key === 'Enter') { e.preventDefault(); startNewBatch(); }
-    else if(e.key === 'Escape') { e.preventDefault(); switchScreen('finalScreen'); }
-  }
-});
-
-/* Show Intro screen initially */
+/* Show intro */
 switchScreen('introScreen');
 </script>
 </body>
