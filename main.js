@@ -1,8 +1,8 @@
 /* 
   main.js
   ======================
-  Handles the core experiment logic, UI flow, event listeners,
-  file upload, and calls the logistic-fitting methods when needed.
+  Core experiment logic, UI flow, event listeners, file upload,
+  and calls to updateSamplingBounds() from adaptiveBounds.js
 */
 
 // ===========================
@@ -15,6 +15,11 @@ const MAX_BASE_FREQ = 880;
 const MIN_GAP_MS    = 250;
 const MAX_GAP_MS    = 2000;
 
+// Default sampling range before 50 real trials
+// Also re-applied if not enough data
+window.lowSemitoneRange  = 0.01;
+window.highSemitoneRange = 2.0;
+
 // Test mode
 let isTestMode = false;
 const NEEDED_TEST_CORRECT = 5;
@@ -25,20 +30,10 @@ let realTrialCount = 0;
 let trialNumberInBatch = 0;
 let batchNumber = 0;
 
-// Ranges for logistic
-// (exported from logisticFit.js but used globally here)
-let lowSemitoneRange  = 0.01;
-let highSemitoneRange = 1.0;
-let alphaFit = -1;
-let betaFit  = 0.5;
-
-// Data
 let trialData = [];
 
-// Times
 let firstSoundStartTime = 0;
 let secondSoundStartTime = 0;
-// Response gating
 let canRespond = false;
 
 let baseFrequency;
@@ -52,7 +47,7 @@ window.addEventListener('load', () => {
   // Show intro screen
   switchScreen('introScreen');
 
-  // Add click listeners for smartphone/touch input
+  // Add click listeners for smartphone/touch
   document.getElementById('higherArea').addEventListener('click', () => {
     handleResponse(true);
   });
@@ -62,7 +57,7 @@ window.addEventListener('load', () => {
 
   // Keyboard events
   document.addEventListener('keydown', handleKeyDown);
-  
+
   // Start Test
   document.getElementById('startTestBtn').addEventListener('click', () => {
     trialData = [];
@@ -119,7 +114,7 @@ function runTestTrial() {
   prepareResponseAreas();
 
   baseFrequency = randomBaseFreq();
-  isSecondHigher = Math.random() < 0.5;
+  isSecondHigher = (Math.random() < 0.5);
 
   const diffSem = 12;
   let ratio = Math.pow(2, diffSem / 12);
@@ -165,12 +160,12 @@ function runRealTrial() {
   baseFrequency = randomBaseFreq();
   isSecondHigher = (Math.random() < 0.5);
 
-  let absSemitone;
-  if(realTrialCount < 50) {
-    absSemitone = pickRandomInLogSpace(0.01, 1.0);
-  } else {
-    absSemitone = pickRandomInLogSpace(lowSemitoneRange, highSemitoneRange);
-  }
+  // If fewer than 50 real trials => sample from [0.01..2]
+  // If >= 50, sample from [lowSemitoneRange..highSemitoneRange]
+  const minVal = (realTrialCount < 50) ? 0.01 : window.lowSemitoneRange;
+  const maxVal = (realTrialCount < 50) ? 2.0   : window.highSemitoneRange;
+
+  let absSemitone = pickRandomInLogSpace(minVal, maxVal);
 
   let ratio = Math.pow(2, absSemitone / 12);
   if(!isSecondHigher) ratio = 1/ratio;
@@ -179,6 +174,7 @@ function runRealTrial() {
   setTimeout(() => {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
+
     const gap = MIN_GAP_MS + Math.random()*(MAX_GAP_MS - MIN_GAP_MS);
     setTimeout(() => {
       secondSoundStartTime = performance.now();
@@ -205,7 +201,7 @@ function handleResponse(userSaysHigher) {
 
   trialData.push({
     timestamp: new Date().toISOString(),
-    isTestMode: isTestMode,
+    isTestMode,
     batchNumber: isTestMode ? 0 : batchNumber,
     trialInBatch: isTestMode ? 0 : (trialNumberInBatch + 1),
     firstPitchHz: baseFrequency,
@@ -222,11 +218,14 @@ function handleResponse(userSaysHigher) {
   } else {
     realTrialCount++;
     trialNumberInBatch++;
+
+    // If we finish a 10-trial batch
     if(trialNumberInBatch >= 10) {
       batchNumber++;
-      // If we have 50 or more real trials, do logistic fitting
+      // If realTrialCount >= 50 => update bounds
       if(realTrialCount >= 50) {
-        fitCustomLogistic();
+        const realTrials = trialData.filter(t => !t.isTestMode);
+        updateSamplingBounds(realTrials, 0.01, 2.0);
       }
       switchScreen('batchEndScreen');
     } else {
@@ -236,62 +235,30 @@ function handleResponse(userSaysHigher) {
 }
 
 /* ===========================
-   5. Logistic Fit
-=========================== */
-function fitCustomLogistic() {
-  // Gather real (non-test) trials
-  const realTrials = trialData.filter(t => !t.isTestMode);
-  if(realTrials.length < 10) return; // too few for stable fit
-
-  const xs = [];
-  const ys = [];
-  for(let t of realTrials) {
-    const sem = t.relativeDiffSemitones;
-    xs.push(Math.log10(sem));
-    ys.push(t.correctness ? 1 : 0);
-  }
-
-  let { alpha, beta } = optimizeLogistic(xs, ys, alphaFit, betaFit, 0.1, 1000);
-  alphaFit = alpha;
-  betaFit  = beta;
-
-  updateRangeFromLogistic(alphaFit, betaFit);
-}
-
-/* ===========================
-   6. File Upload Handler
+   5. File Upload Handler
 =========================== */
 function handleFileUpload(e) {
   const file = e.target.files[0];
   if(!file) return;
-
   const reader = new FileReader();
   reader.onload = function(evt) {
     try {
       const loadedData = JSON.parse(evt.target.result);
       if(Array.isArray(loadedData)) {
-        // Merge data
         trialData = loadedData.concat(trialData);
-
-        // Count how many real trials are present
+        // count how many real trials
         const realCount = trialData.filter(t => !t.isTestMode).length;
-
-        // If we have enough data, do logistic fit, skip test if we want
         if(realCount >= 50) {
           isTestMode = false;
           realTrialCount = realCount;
-
-          // figure out how many batches have passed, how many in current batch
           batchNumber = Math.floor(realTrialCount / 10);
           trialNumberInBatch = realTrialCount % 10;
-
-          // Fit logistic immediately
-          fitCustomLogistic();
-
-          // Start real if not yet started
+          // update sampling bounds from existing data
+          const realTrials = trialData.filter(t => !t.isTestMode);
+          updateSamplingBounds(realTrials, 0.01, 2.0);
           runRealTrial();
         } else {
-          // Not enough data => maybe do test or partial real
+          // not enough => do test or partial real
           startTestTrials();
         }
       } else {
@@ -305,14 +272,13 @@ function handleFileUpload(e) {
 }
 
 function startTestTrials() {
-  // If user must do test anyway
   isTestMode = true;
   testCorrectCount = 0;
   runTestTrial();
 }
 
 /* ===========================
-   7. UI Helpers & Utility
+   6. UI Helpers & Utility
 =========================== */
 function switchScreen(screenId) {
   const screens = [
@@ -360,20 +326,18 @@ function playTone(freq, durationSec) {
   const osc = audioContext.createOscillator();
   osc.type = 'sine';
   osc.frequency.value = freq;
-
   const gain = audioContext.createGain();
   gain.gain.setValueAtTime(0, audioContext.currentTime);
   gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.01);
   gain.gain.setValueAtTime(1, audioContext.currentTime + durationSec - 0.01);
   gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + durationSec);
-
   osc.connect(gain).connect(audioContext.destination);
   osc.start();
   osc.stop(audioContext.currentTime + durationSec);
 }
 
 /* ===========================
-   8. Keyboard Events
+   7. Keyboard Events
 =========================== */
 function handleKeyDown(e) {
   const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
