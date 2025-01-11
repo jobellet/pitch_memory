@@ -1,88 +1,98 @@
 /* 
-  logisticFit.js
-  ====================
-  Contains the logistic function, the SSE-based gradient descent, 
-  and the function for updating the semitone range.
+  adaptiveBounds.js
+  =================
+  Defines how we update lowSemitoneRange & highSemitoneRange
+  based on the user’s performance data, removing logistic regression.
 */
 
-/**
- * logistic: logistic in [0.5..1] 
- * @param {number} x - log10(semitones)
- * @param {number} alpha
- * @param {number} beta
+/** 
+ * Externally we have:
+ *   let lowSemitoneRange  = 0.01;
+ *   let highSemitoneRange = 2.0;
+ * from main.js 
+ * 
+ * Our job: after 50 real trials, find new bounds:
+ *   - upperBound = smallest semitone for which accuracy on all trials ABOVE that semitone is >90%
+ *   - lowerBound = largest semitone for which accuracy on all trials BELOW that semitone is <60%
+ * 
+ * We'll store the result in the global lowSemitoneRange, highSemitoneRange.
  */
-function logistic(x, alpha, beta) {
-  return 0.5 + 0.5 / (1 + Math.exp(-(x - alpha) / beta));
-}
 
 /**
- * optimizeLogistic: gradient descent to find alpha, beta
- * @param {Array<number>} xs - log10(semitone) data points
- * @param {Array<number>} ys - correctness values [0 or 1]
- * @param {number} initialAlpha 
- * @param {number} initialBeta
- * @param {number} learningRate
- * @param {number} iterations
- * @returns {{ alpha: number, beta: number }}
+ * updateSamplingBounds: sorts trials by absSemitone, checks accuracy above/below candidate thresholds
+ * @param {Array} realTrials - array of real (non-test) trial objects 
+ *        each having { relativeDiffSemitones, correctness }
+ * @param {number} defaultLow
+ * @param {number} defaultHigh
  */
-function optimizeLogistic(xs, ys, initialAlpha = -1, initialBeta = 0.5, learningRate = 0.1, iterations = 1000) {
-  let alpha = initialAlpha;
-  let beta  = initialBeta;
+function updateSamplingBounds(realTrials, defaultLow = 0.01, defaultHigh = 2.0) {
+  if(realTrials.length < 50) {
+    // Not enough data => just keep defaults
+    window.lowSemitoneRange  = defaultLow;
+    window.highSemitoneRange = defaultHigh;
+    return;
+  }
 
-  for (let iter = 0; iter < iterations; iter++) {
-    let gradAlpha = 0;
-    let gradBeta  = 0;
+  // Sort ascending by semitone
+  const sorted = [...realTrials].sort((a,b) => 
+    a.relativeDiffSemitones - b.relativeDiffSemitones
+  );
 
-    for (let i = 0; i < xs.length; i++) {
-      let pred = logistic(xs[i], alpha, beta);
-      let error = pred - ys[i];
-      // derivative of logistic wrt "Z"
-      let dPred_dZ = pred * (1 - pred);
+  // We'll define some helper functions
+  function accuracy(trials) {
+    if(trials.length === 0) return 1; // or assume 100% if no data, to avoid messing up
+    let correctCount = trials.filter(t => t.correctness).length;
+    return correctCount / trials.length;
+  }
 
-      // Z = -(xs[i] - alpha)/beta
-      // partial wrt alpha => (1/beta)
-      gradAlpha += error * dPred_dZ * (1 / beta);
+  // We'll look at each possible semitone value as a boundary
+  // for the "above" or "below" sets, and find the best candidate.
 
-      // partial wrt beta => (xs[i] - alpha)/(beta^2)
-      gradBeta  += error * dPred_dZ * ((xs[i] - alpha) / (beta**2));
-    }
+  // Initialize new bounds to defaults
+  let newLow  = defaultLow;
+  let newHigh = defaultHigh;
 
-    gradAlpha /= xs.length;
-    gradBeta  /= xs.length;
+  // For the newHigh => we want the smallest semitone X s.t. accuracy on trials with semitone > X > 90%
+  // We'll iterate over unique semitone values from largest to smallest
+  // But let's do an ascending pass or a descending pass. Let's do ascending:
+  let uniqueSems = [...new Set(sorted.map(t => t.relativeDiffSemitones))];
 
-    alpha -= learningRate * gradAlpha;
-    beta  -= learningRate * gradBeta;
+  // The approach:
+  // For each candidate 'c' in ascending order:
+  //   let aboveSet = all trials with semitone > c
+  //   if accuracy(aboveSet) > 0.9 => newHigh = c; break
+  // Because we want the *smallest* c for which aboveSet is >90%.
 
-    if(Math.abs(gradAlpha) < 1e-6 && Math.abs(gradBeta) < 1e-6) {
+  for(let c of uniqueSems) {
+    let aboveSet = sorted.filter(t => t.relativeDiffSemitones > c);
+    if(accuracy(aboveSet) > 0.9) {
+      newHigh = c; 
       break;
     }
   }
 
-  return { alpha, beta };
-}
-
-/**
- * updateRangeFromLogistic: find log10(x) in [0.7..0.8] 
- * @param {number} alpha
- * @param {number} beta
- * Updates global lowSemitoneRange, highSemitoneRange
- */
-function updateRangeFromLogistic(alpha, beta) {
-  let validXs = [];
-  for(let logx = -3; logx <= 0.3; logx += 0.01) {
-    let p = logistic(logx, alpha, beta);
-    if(p >= 0.7 && p <= 0.8) {
-      validXs.push(logx);
+  // For the newLow => we want the largest semitone X s.t. accuracy on trials with semitone < X < 60%
+  // So let's do descending pass over uniqueSems
+  for(let i = uniqueSems.length -1; i >= 0; i--) {
+    let c = uniqueSems[i];
+    let belowSet = sorted.filter(t => t.relativeDiffSemitones < c);
+    if(accuracy(belowSet) < 0.6) {
+      newLow = c;
+      break;
     }
   }
-  if(validXs.length > 0) {
-    let minLog = Math.min(...validXs);
-    let maxLog = Math.max(...validXs);
-    lowSemitoneRange  = Math.max(0.01, Math.pow(10, minLog));
-    highSemitoneRange = Math.max(lowSemitoneRange, Math.pow(10, maxLog));
-  } else {
-    // fallback
-    lowSemitoneRange  = 0.01;
-    highSemitoneRange = 1.0;
+
+  // Safety clamp to avoid crossing or going below 0.01
+  if(newLow < 0.01)   newLow = 0.01;
+  if(newHigh < 0.01)  newHigh = 0.01; // just in case
+  if(newHigh < newLow) {
+    // if we messed up and high < low, swap or fallback
+    const tmp = newLow;
+    newLow = 0.01;
+    newHigh = tmp;
   }
+
+  // Now store these in global
+  window.lowSemitoneRange  = newLow;
+  window.highSemitoneRange = newHigh;
 }
