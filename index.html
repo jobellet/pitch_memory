@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Custom Logistic Fit</title>
+  <title>Pitch Discrimination Experiment – Empirical Bounds</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Link the external CSS -->
   <link rel="stylesheet" href="style.css" />
@@ -18,10 +18,11 @@
       Decide if the <strong>second tone</strong> is higher (↑) or lower (↓) than the first.<br><br>
       <strong>Test Mode</strong>: Large, fixed difference (12 semitones). You must get 5 consecutive correct to proceed.<br>
       <strong>Real Experiment</strong>:<br>
-      - First 50 real trials are sampled uniformly in log space [0.01..1 semitone].<br>
-      - Then we fit a logistic curve (~0.5–1 range) to find intervals giving ~70–80% accuracy,<br>
-        sampling that range in log space afterwards.<br>
-      - Every 10 real trials beyond 50, you will see a <em>Batch End</em> screen to continue or stop.<br>
+      - First 50 real trials sample semitone differences uniformly in log space [0.01..2] semitones.<br>
+      - After 50 (or if you upload data with ≥50 real trials), we re‐compute the upper/lower bounds based on your performance.<br>
+        * If you’re >90% correct above a certain threshold, that becomes the new upper bound (we shrink it).<br>
+        * If you’re <60% correct below a certain threshold, that becomes the new lower bound (we raise it).<br>
+      - Every 10 real trials beyond 50, you see a <em>Batch End</em> screen to continue or stop.<br>
     </p>
     <button id="startTestBtn">Start Test Mode</button>
     <p>Or upload a previous experiment data file:</p>
@@ -45,8 +46,8 @@
     <p>
       You have reached 5 consecutive correct answers in the test trials.<br>
       Now the real experiment will begin.<br>
-      The first 50 real trials are random semitones in [0.01..1] (log scale).<br>
-      After 50, we will fit a logistic function around ~70–80% accuracy.<br><br>
+      The first 50 real trials sample semitone differences from 0.01..2 (log scale).<br>
+      After 50, we adapt bounds to keep you near 60–90% accuracy ranges.<br><br>
       Press Enter or click below to continue.
     </p>
     <button id="startRealBtn">Continue</button>
@@ -77,9 +78,7 @@
 </div>
 
 <!-- =============== Scripts =============== -->
-<!-- 1) logistic-fitting code -->
-<script src="logisticFit.js"></script>
-<!-- 2) main experiment code -->
+<script src="adaptiveBounds.js"></script>
 <script src="main.js"></script>
 
 </body>
