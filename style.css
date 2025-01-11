@@ -1,0 +1,96 @@
+/* Full-page layout, no scrolling */
+html, body {
+  margin: 0; 
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: sans-serif;
+  overflow: hidden;
+}
+
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: none;
+}
+
+.centered-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+button {
+  font-size: 1rem;
+  margin: 10px;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+/* ===== Trial Screen Layout ===== */
+#trialScreen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: #fff;
+}
+
+/* A small bar at the top to display "Trial n/10" */
+#trialCounter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 40px;
+  line-height: 40px;
+  background-color: #ddd;
+  text-align: center;
+  font-weight: bold;
+  display: none; /* hidden by default */
+}
+
+/* Horizontal line at 50% screen height */
+#horizontalLine {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: black;
+  top: 50%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Top half => Higher */
+#higherArea, 
+#lowerArea {
+  width: 100%;
+  font-size: 2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: gray; /* Initially disabled */
+}
+
+#higherArea {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  height: calc(50% - 40px);
+}
+
+/* Bottom half => Lower */
+#lowerArea {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 50%;
+}
