@@ -2,68 +2,108 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Logistic Fit as soon as >50 Trials</title>
+  <title>Pitch Discrimination Experiment – Immediate Fit Over 50 Trials</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     /* Full-page layout, no scrolling */
     html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
+      margin: 0; 
+      padding: 0;
+      width: 100%;
+      height: 100%;
       font-family: sans-serif;
       overflow: hidden;
     }
     .screen {
       position: relative;
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       display: none;
     }
     .centered-content {
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       text-align: center;
-      width: 100%; height: 100%;
-      padding: 20px; box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+      box-sizing: border-box;
     }
     button {
-      font-size: 1rem; margin: 10px; padding: 10px 20px;
+      font-size: 1rem;
+      margin: 10px;
+      padding: 10px 20px;
       cursor: pointer;
     }
 
     /* ===== Trial Screen Layout ===== */
     #trialScreen {
       position: relative;
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       background-color: #fff;
       display: none;
     }
     #trialCounter {
-      position: absolute; top: 0; left: 0;
-      width: 100%; height: 40px; line-height: 40px;
-      background-color: #ddd; text-align: center;
-      font-weight: bold; display: none;
+      position: absolute;
+      top: 0; 
+      left: 0;
+      width: 100%; 
+      height: 40px;
+      line-height: 40px;
+      background-color: #ddd;
+      text-align: center;
+      font-weight: bold;
+      display: none;
     }
+
+    /* A thick boundary line at ~50% of screen height */
     #horizontalLine {
-      /* This is our thick boundary between the two response areas.
-         Default: thick gray, becomes black when user can respond. */
-      position: absolute; left: 0; width: 100%;
-      top: 50%;
+      position: absolute;
+      left: 0;
+      width: 100%;
+      /* Center it around 50%: top = 50%-3px, so line is 6px thick total */
+      top: calc(50% - 3px);
       height: 6px; 
       background-color: gray;
-      margin: 0; padding: 0;
+      margin: 0; 
+      padding: 0;
+      z-index: 10;
+      pointer-events: none; /* don't block clicks */
     }
-    #higherArea, #lowerArea {
-      width: 100%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 2rem; cursor: pointer;
-      background-color: #fff; /* White background (no color fill) */
-    }
+
+    /* The top half => HIGHER */
     #higherArea {
-      position: absolute; top: 40px; left: 0;
-      height: calc(50% - 40px);
+      position: absolute;
+      top: 40px; 
+      left: 0;
+      /* leave room for the line’s half-thickness */
+      height: calc(50% - 40px - 3px);
+      width: 100%;
+      background-color: #fff; /* white */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
     }
+
+    /* The bottom half => LOWER */
     #lowerArea {
-      position: absolute; bottom: 0; left: 0;
-      height: 50%;
+      position: absolute;
+      /* start just below the line’s half-thickness */
+      top: calc(50% + 3px);
+      left: 0;
+      height: calc(50% - 3px);
+      width: 100%;
+      background-color: #fff; /* white */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -82,8 +122,8 @@
       For the first 50 trials, we pick the semitone difference from 0.01 to 1, 
       uniformly in log10 space.<br>
       After 50 trials, we fit a logistic curve, then only test intervals 
-      where predicted accuracy is 70–80%. This region is recalculated 
-      after every 10 additional trials.
+      where predicted accuracy is 70–80%. 
+      This region is recalculated after every 10 additional trials.
     </p>
     <button id="startBtn">Start Experiment</button>
     <br>
@@ -188,7 +228,7 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
         // Combine the loaded data with any existing data
         trialData = loadedData.concat(trialData);
 
-        // If we now have >50 trials, fit immediately
+        // If we now have >50 trials => fit immediately
         if(trialData.length > FREE_EXPLORATION_COUNT) {
           fitLogisticAndUpdateRange();
         }
@@ -224,7 +264,7 @@ function startTrial() {
   switchScreen('trialScreen');
   updateTrialCounter(trialNumberInBatch + 1, TRIALS_PER_BATCH);
 
-  // Gray boundary => no response
+  // boundary line gray => no response yet
   setResponseActive(false);
 
   // 1) Choose base freq
@@ -257,7 +297,7 @@ function startTrial() {
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
-      // Turn boundary black => can respond
+      // boundary line => black => can respond
       setResponseActive(true);
     }, gap);
   }, 300);
@@ -399,6 +439,7 @@ function setResponseActive(state) {
   horiz.style.backgroundColor = state ? 'black' : 'gray';
 }
 
+/* Return a random number in [minVal, maxVal], uniform in log10 */
 function pickRandomInLogSpace(minVal, maxVal) {
   const logMin = Math.log10(minVal);
   const logMax = Math.log10(maxVal);
@@ -406,6 +447,7 @@ function pickRandomInLogSpace(minVal, maxVal) {
   const randLog = logMin + r*(logMax - logMin);
   return Math.pow(10, randLog);
 }
+
 function clampFreq(freq) {
   return Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, freq));
 }
