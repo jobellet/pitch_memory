@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Discrimination Experiment – Logistic Fit at 50 Trials</title>
+  <title>Pitch Discrimination Experiment – Logistic Fit as soon as >50 Trials</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     /* Full-page layout, no scrolling */
@@ -43,23 +43,27 @@
       font-weight: bold; display: none;
     }
     #horizontalLine {
-      position: absolute; left: 0; width: 100%; height: 2px;
-      background-color: black; top: 50%; margin: 0; padding: 0;
+      /* This is our thick boundary between the two response areas.
+         Default: thick gray, becomes black when user can respond. */
+      position: absolute; left: 0; width: 100%;
+      top: 50%;
+      height: 6px; 
+      background-color: gray;
+      margin: 0; padding: 0;
     }
     #higherArea, #lowerArea {
       width: 100%;
       display: flex; align-items: center; justify-content: center;
       font-size: 2rem; cursor: pointer;
+      background-color: #fff; /* White background (no color fill) */
     }
     #higherArea {
       position: absolute; top: 40px; left: 0;
       height: calc(50% - 40px);
-      background-color: gray; /* initially disabled */
     }
     #lowerArea {
       position: absolute; bottom: 0; left: 0;
       height: 50%;
-      background-color: gray; /* initially disabled */
     }
   </style>
 </head>
@@ -75,9 +79,11 @@
       or lower (<strong>↓</strong>) than the first.<br><br>
       - <strong>Keyboard</strong>: Up Arrow = Higher, Down Arrow = Lower<br>
       - <strong>Touch</strong>: Tap the top half for Higher, bottom half for Lower<br><br>
-      For the first 50 trials, the semitone difference is randomly chosen between 0.01 and 1 (uniform in log10).<br>
-      After 50 trials, a logistic curve is fit, and only semitones in the <em>70–80% accuracy</em> region are tested.<br>
-      This region is recalculated after every 10 trials.
+      For the first 50 trials, we pick the semitone difference from 0.01 to 1, 
+      uniformly in log10 space.<br>
+      After 50 trials, we fit a logistic curve, then only test intervals 
+      where predicted accuracy is 70–80%. This region is recalculated 
+      after every 10 additional trials.
     </p>
     <button id="startBtn">Start Experiment</button>
     <br>
@@ -129,13 +135,13 @@ const MAX_BASE_FREQ = 880;
 const MIN_GAP_MS = 250;
 const MAX_GAP_MS = 2000;
 
-// For the first 50 trials => random .01–1 semitones, log10 sampling
+// For the first 50 trials => random .01–1 semitones (log10).
 const FREE_EXPLORATION_COUNT = 50;
 
-// After 50 trials => logistic fit each time we complete 10 trials
+// After 50 trials => logistic fit each time we finish 10 more trials
 const TRIALS_PER_BATCH = 10;
 
-let trialNumber = 0;     // counts how many trials total
+let trialNumber = 0;     
 let trialNumberInBatch = 0;
 let batchNumber = 0;
 
@@ -149,11 +155,11 @@ let canRespond = false;
 // Data
 let trialData = [];
 
-// Our logistic curve parameters, updated after 50 trials and each 10-trial batch
-let alphaFit = -1;   // initial guess
-let betaFit  = 0.5;  // initial guess
+// Logistic curve parameters
+let alphaFit = -1;   
+let betaFit  = 0.5;  
 
-// Range of semitones used after fitting. We'll find semitones for logistic in [0.7, 0.8].
+// Range of semitones after logistic fit. We'll find the region for [0.7..0.8].
 let lowSemitoneRange = 0.01;
 let highSemitoneRange = 1.0;
 
@@ -179,16 +185,23 @@ document.getElementById('fileInput').addEventListener('change', (event) => {
     try {
       const loadedData = JSON.parse(e.target.result);
       if (Array.isArray(loadedData)) {
+        // Combine the loaded data with any existing data
         trialData = loadedData.concat(trialData);
+
+        // If we now have >50 trials, fit immediately
+        if(trialData.length > FREE_EXPLORATION_COUNT) {
+          fitLogisticAndUpdateRange();
+        }
+
+        // Continue from the next trial
+        trialNumber = trialData.length;
+        trialNumberInBatch = trialNumber % TRIALS_PER_BATCH;
+        batchNumber = Math.floor(trialNumber / TRIALS_PER_BATCH);
+        startTrial();
       } else {
         alert('Invalid JSON format.');
         return;
       }
-      // Start from the next trial
-      trialNumber = trialData.length;
-      trialNumberInBatch = trialNumber % TRIALS_PER_BATCH;
-      batchNumber = Math.floor(trialNumber / TRIALS_PER_BATCH);
-      startTrial();
     } catch (err) {
       alert('Error parsing JSON: ' + err);
     }
@@ -204,41 +217,14 @@ document.getElementById('stopBtn').addEventListener('click', () => {
 });
 document.getElementById('downloadBtn').addEventListener('click', downloadData);
 
-document.getElementById('higherArea').addEventListener('click', () => handleResponse(true));
-document.getElementById('lowerArea').addEventListener('click', () => handleResponse(false));
-
-document.addEventListener('keydown', (e) => {
-  const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
-  const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
-
-  if(trialVisible) {
-    if(e.key === 'ArrowUp') {
-      e.preventDefault();
-      handleResponse(true);
-    } else if(e.key === 'ArrowDown') {
-      e.preventDefault();
-      handleResponse(false);
-    }
-  }
-  else if(batchEndVisible) {
-    if(e.key === 'Enter') {
-      e.preventDefault();
-      startNewBatch();
-    } else if(e.key === 'Escape') {
-      e.preventDefault();
-      switchScreen('finalScreen');
-    }
-  }
-});
-
 /* ===========================
-   2. Trials
+   2. Trial Flow
 =========================== */
 function startTrial() {
   switchScreen('trialScreen');
-  updateTrialCounter(trialNumberInBatch+1, TRIALS_PER_BATCH);
+  updateTrialCounter(trialNumberInBatch + 1, TRIALS_PER_BATCH);
 
-  // Gray out response until second tone
+  // Gray boundary => no response
   setResponseActive(false);
 
   // 1) Choose base freq
@@ -250,20 +236,19 @@ function startTrial() {
   // 3) pick semitone difference
   let absSemitone;
   if(trialNumber < FREE_EXPLORATION_COUNT) {
-    // first 50 trials => uniform in log10 from .01 to 1
+    // first 50 trials => random in log10 .01..1
     absSemitone = pickRandomInLogSpace(0.01, 1);
   } else {
-    // after 50 trials => logistic fit is done => sample in [lowSemitoneRange, highSemitoneRange] in log space
+    // after 50 trials => sample in the [lowSemitoneRange, highSemitoneRange]
     absSemitone = pickRandomInLogSpace(lowSemitoneRange, highSemitoneRange);
   }
 
   // 4) compute ratio
   let ratio = Math.pow(2, absSemitone / 12);
   if (!isSecondHigher) ratio = 1 / ratio;
-
   secondFrequency = clampFreq(baseFrequency * ratio);
 
-  // 5) Play
+  // 5) play tones
   setTimeout(() => {
     firstSoundStartTime = performance.now();
     playTone(baseFrequency, TONE_DURATION);
@@ -272,14 +257,14 @@ function startTrial() {
     setTimeout(() => {
       secondSoundStartTime = performance.now();
       playTone(secondFrequency, TONE_DURATION);
+      // Turn boundary black => can respond
       setResponseActive(true);
     }, gap);
   }, 300);
 }
 
-/* Handle response */
 function handleResponse(userSaysHigher) {
-  if (!canRespond) return; // ignore if responded too early
+  if(!canRespond) return;
 
   const now = performance.now();
   const correct = (userSaysHigher === isSecondHigher);
@@ -305,12 +290,12 @@ function handleResponse(userSaysHigher) {
     reactionTimeMs: reactionTimeMs
   });
 
-  // update counters
   trialNumber++;
   trialNumberInBatch++;
-  
+
+  // if done a batch
   if(trialNumberInBatch >= TRIALS_PER_BATCH) {
-    // end of a batch => maybe re-fit logistic if we are beyond 50 trials
+    // If we have >50 trials => fit logistic
     if(trialNumber >= FREE_EXPLORATION_COUNT) {
       fitLogisticAndUpdateRange();
     }
@@ -321,7 +306,6 @@ function handleResponse(userSaysHigher) {
   }
 }
 
-/* Start next batch after finishing 10 trials. */
 function startNewBatch() {
   batchNumber++;
   trialNumberInBatch = 0;
@@ -329,19 +313,13 @@ function startNewBatch() {
 }
 
 /* ===========================
-   3. Logistic Fit & Range 
+   3. Logistic Fit 
 =========================== */
-/**
- * We fit logistic: P(x) = 0.5 + 0.5 / [1 + exp(-(x - alpha)/beta)]
- * x = log10(semitone).
- * We'll do a naive grid-search in alpha in [-3..0], beta in [0.05..1], stepping some small increments.
- * Minimizing SSE or cross-entropy. We'll do SSE for simplicity.
- */
 function fitLogisticAndUpdateRange() {
-  const data = trialData; // all trials so far
-  if(data.length < 10) return; // not enough data
+  const data = trialData;
+  if(data.length < 10) return;
 
-  // Extract x=log10(semitone), y=correctness
+  // Build arrays for x=log10(sem), y=correct
   const xs = [];
   const ys = [];
   for(let d of data) {
@@ -351,15 +329,13 @@ function fitLogisticAndUpdateRange() {
       ys.push(d.correctness ? 1 : 0);
     }
   }
-  if(xs.length < 10) return; // still no enough valid points
+  if(xs.length < 10) return;
 
-  // Naive search
+  // naive grid search
   let bestAlpha = -1;
   let bestBeta = 0.5;
   let bestSSE = 1e9;
 
-  // alpha: from -3 to 0 in steps of 0.05
-  // beta : from 0.05 to 1.0 in steps of 0.05
   for(let alpha = -3; alpha <= 0; alpha += 0.05) {
     for(let beta = 0.05; beta <= 1.0; beta += 0.05) {
       let sse = 0;
@@ -377,16 +353,12 @@ function fitLogisticAndUpdateRange() {
   }
 
   alphaFit = bestAlpha;
-  betaFit = bestBeta;
+  betaFit  = bestBeta;
 
-  // Now find semitone range for which logistic in [0.7..0.8].
-  // We'll search in [log10(0.001)..log10(2.0)] or something, because we know max semitone is 2?
-  // Actually, user said up to 1 semitone, but let's assume maybe up to ~2 semitones for safety
+  // find [0.7..0.8] range
   let leftBound = 0.01;
   let rightBound = 1.0;
 
-  // We'll sample many points in [0.001..2.0], see which region yields logistic in [0.7..0.8].
-  // Then pick min, max semitone from that region.
   let candidateX = [];
   for(let logx=-3; logx<=0.3; logx+=0.01) {
     candidateX.push(logx);
@@ -397,31 +369,36 @@ function fitLogisticAndUpdateRange() {
     return (p >= 0.7 && p <= 0.8);
   });
 
-  // If we have any valid points, pick min & max of that set => in semitone domain
   if(validXs.length > 0) {
     leftBound = Math.pow(10, Math.min(...validXs));
     rightBound = Math.pow(10, Math.max(...validXs));
   } else {
-    // fallback
     leftBound = 0.01;
     rightBound = 1.0;
   }
 
-  lowSemitoneRange = clampRange(leftBound);
+  lowSemitoneRange  = clampRange(leftBound);
   highSemitoneRange = clampRange(rightBound);
 }
 
 function logistic(x, alpha, beta) {
-  // bounded between 0.5 and 1
+  // logistic bounded [0.5..1]
   return 0.5 + 0.5 / (1 + Math.exp(-(x - alpha)/beta));
 }
 function clampRange(v) {
-  return Math.min(2.0, Math.max(0.01, v));  // clamp range to [0.01..2]
+  // clamp to [0.01..2]
+  return Math.min(2.0, Math.max(0.01, v));
 }
 
 /* ===========================
-   4. Utility
+   4. UI, Audio, Etc
 =========================== */
+function setResponseActive(state) {
+  canRespond = state;
+  const horiz = document.getElementById('horizontalLine');
+  horiz.style.backgroundColor = state ? 'black' : 'gray';
+}
+
 function pickRandomInLogSpace(minVal, maxVal) {
   const logMin = Math.log10(minVal);
   const logMax = Math.log10(maxVal);
@@ -429,22 +406,8 @@ function pickRandomInLogSpace(minVal, maxVal) {
   const randLog = logMin + r*(logMax - logMin);
   return Math.pow(10, randLog);
 }
-
 function clampFreq(freq) {
   return Math.max(MIN_BASE_FREQ, Math.min(MAX_BASE_FREQ, freq));
-}
-
-function setResponseActive(state) {
-  canRespond = state;
-  const higherArea = document.getElementById('higherArea');
-  const lowerArea = document.getElementById('lowerArea');
-  if(state) {
-    higherArea.style.backgroundColor = '#eef';
-    lowerArea.style.backgroundColor = '#fee';
-  } else {
-    higherArea.style.backgroundColor = 'gray';
-    lowerArea.style.backgroundColor = 'gray';
-  }
 }
 
 /* Show/hide screens */
@@ -480,9 +443,7 @@ function playTone(freq, durationSec) {
   osc.stop(audioContext.currentTime + durationSec);
 }
 
-/* ===========================
-   5. Download Data
-=========================== */
+/* Download Data */
 function downloadData() {
   const dataStr = JSON.stringify(trialData, null, 2);
   const blob = new Blob([dataStr], {type: "application/json"});
@@ -494,8 +455,33 @@ function downloadData() {
   URL.revokeObjectURL(url);
 }
 
-/* Show intro */
+/* Show Intro initially */
 switchScreen('introScreen');
+
+/* Keyboard for trial or batch screen */
+document.addEventListener('keydown', (e) => {
+  const trialVisible = (document.getElementById('trialScreen').style.display === 'block');
+  const batchEndVisible = (document.getElementById('batchEndScreen').style.display === 'block');
+
+  if(trialVisible) {
+    if(e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleResponse(true);
+    } else if(e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleResponse(false);
+    }
+  }
+  else if(batchEndVisible) {
+    if(e.key === 'Enter') {
+      e.preventDefault();
+      startNewBatch();
+    } else if(e.key === 'Escape') {
+      e.preventDefault();
+      switchScreen('finalScreen');
+    }
+  }
+});
 </script>
 </body>
 </html>
