@@ -549,6 +549,14 @@ document.addEventListener('keydown', function(e) {
    11. Start Experiment
 =========================== */
 switchScreen('introScreen');
+
+/* Add click listeners for smartphone/touch input */
+document.getElementById('higherArea').addEventListener('click', () => {
+  handleResponse(true);
+});
+document.getElementById('lowerArea').addEventListener('click', () => {
+  handleResponse(false);
+});
 </script>
 </body>
 </html>
