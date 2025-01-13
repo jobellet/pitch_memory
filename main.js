@@ -141,13 +141,12 @@ function runTestTrial() {
   }, 300);
 }
 
-
 function handleTestResponse(correct) {
   if(correct) {
     testCorrectCount++;
-    alert(Correct! (${testCorrectCount}/${NEEDED_TEST_CORRECT}));
+    alert(`Correct! (${testCorrectCount}/${NEEDED_TEST_CORRECT})`);
   } else {
-    alert(Wrong! Still ${testCorrectCount}/${NEEDED_TEST_CORRECT} correct.);
+    alert(`Wrong! Still ${testCorrectCount}/${NEEDED_TEST_CORRECT} correct.`);
   }
   if(testCorrectCount >= NEEDED_TEST_CORRECT) {
     switchScreen('testCompleteScreen');
@@ -300,7 +299,7 @@ function hideTrialCounter(shouldHide) {
   document.getElementById('trialCounter').style.display = shouldHide ? "none" : "block";
 }
 function updateTrialCounter(current, total) {
-  document.getElementById('trialCounter').textContent = Trial ${current} / ${total};
+  document.getElementById('trialCounter').textContent = `Trial ${current} / ${total}`;
 }
 function prepareResponseAreas() {
   canRespond = false;
@@ -388,7 +387,6 @@ function playDoubleTone(freq1, freq2, toneDurationSec, gapMs) {
     source.start();
   });
 }
-
 
 /* ===========================
    7. Keyboard Events
