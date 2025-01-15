@@ -9,11 +9,11 @@
 // 0. Global Parameters
 // ===========================
 let audioContext;
-const TONE_DURATION = 0.25;
-const MIN_BASE_FREQ = 220;
+const TONE_DURATION = 0.05;
+const MIN_BASE_FREQ = 440;
 const MAX_BASE_FREQ = 880;
 const MIN_GAP_MS    = 1;
-const MAX_GAP_MS    = 2000;
+const MAX_GAP_MS    = 1000;
 
 // Default sampling range before 50 real trials
 // Also re-applied if not enough data
