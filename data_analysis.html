@@ -1,35 +1,152 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Analysis</title>
-    <link rel="stylesheet" href="style.css">
-    <script defer src="main.js"></script>
+  <meta charset="UTF-8" />
+  <title>Pitch Memory Heatmap Visualization</title>
+  <script src="https://cdn.plot.ly/plotly-2.16.1.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { text-align: center; }
+    #controls { text-align: center; margin-bottom: 20px; }
+    #heatmap { width: 80%; margin: auto; }
+    label { margin: 0 10px; }
+  </style>
 </head>
 <body>
-    <h1>Data Analysis Visualization</h1>
-    
-    <label for="visualization-select">Choose a visualization:</label>
-    <select id="visualization-select" onchange="updateVisualization()">
-        <option value="chart1">Chart 1</option>
-        <option value="chart2">Chart 2</option>
-        <option value="chart3">Chart 3</option>
-    </select>
-    
-    <div id="visualization-container">
-        <canvas id="chart1" class="chart"></canvas>
-        <canvas id="chart2" class="chart" style="display:none;"></canvas>
-        <canvas id="chart3" class="chart" style="display:none;"></canvas>
-    </div>
-    
-    <script>
-        function updateVisualization() {
-            const selectedValue = document.getElementById('visualization-select').value;
-            const charts = document.querySelectorAll('.chart');
-            charts.forEach(chart => chart.style.display = 'none');
-            document.getElementById(selectedValue).style.display = 'block';
+  <h1>Average Accuracy Heatmap</h1>
+  <div id="controls">
+    <label>
+      X-axis Quantiles (Gap Duration):
+      <input type="number" id="xQuantiles" value="4" min="1" max="20" />
+    </label>
+    <label>
+      Y-axis Quantiles (Semitone Diff):
+      <input type="number" id="yQuantiles" value="4" min="1" max="20" />
+    </label>
+    <button id="updateHeatmap">Update Heatmap</button>
+  </div>
+  <div id="heatmap"></div>
+
+  <script>
+    let experimentData = [];
+
+    // Load JSON data
+    fetch("experiment_data.json")  // Replace with the correct path to your JSON file
+      .then(response => response.json())
+      .then(data => {
+        experimentData = data;
+        // Initial heatmap rendering with default quantiles
+        updateHeatmap();
+      })
+      .catch(err => console.error("Error loading data:", err));
+
+    // Utility: Compute quantile boundaries given sorted array and number of quantiles
+    function computeQuantileBins(sortedValues, quantiles) {
+      const bins = [];
+      for (let i = 0; i <= quantiles; i++) {
+        const q = i / quantiles;
+        const pos = q * (sortedValues.length - 1);
+        const base = Math.floor(pos);
+        const rest = pos - base;
+        if (base + 1 < sortedValues.length) {
+          bins.push(sortedValues[base] + rest * (sortedValues[base + 1] - sortedValues[base]));
+        } else {
+          bins.push(sortedValues[base]);
         }
-    </script>
+      }
+      return bins;
+    }
+
+    // Main function to update the heatmap based on quantiles
+    function updateHeatmap() {
+      const xQuantiles = parseInt(document.getElementById("xQuantiles").value) || 4;
+      const yQuantiles = parseInt(document.getElementById("yQuantiles").value) || 4;
+
+      // Extract gap durations and semitone differences from data
+      const gapDurations = experimentData.map(d => parseFloat(d.gapDurationMs));
+      const semitoneDiffs = experimentData.map(d => parseFloat(d.relativeDiffSemitones));
+      const accuracies = experimentData.map(d => d.correctness ? 1 : 0);
+
+      // Sort arrays for quantile computation
+      const sortedGaps = [...gapDurations].sort((a,b) => a-b);
+      const sortedSemitones = [...semitoneDiffs].sort((a,b) => a-b);
+
+      // Compute quantile boundaries for x and y axes
+      const xBins = computeQuantileBins(sortedGaps, xQuantiles);
+      const yBins = computeQuantileBins(sortedSemitones, yQuantiles);
+
+      // Initialize a 2D array for averaging accuracies in each bin
+      let heatmapMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(null));
+      let countMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
+
+      // Create 2D arrays to accumulate sum of accuracies and counts for each bin
+      let sumMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
+
+      // Function to find bin index given value and bin boundaries
+      function findBin(value, bins) {
+        for (let i = 0; i < bins.length - 1; i++) {
+          if (value >= bins[i] && value <= bins[i+1]) {
+            return i;
+          }
+        }
+        return bins.length - 2;
+      }
+
+      // Assign each data point to a bin and accumulate accuracy sums
+      for (let i = 0; i < experimentData.length; i++) {
+        const gap = gapDurations[i];
+        const semDiff = semitoneDiffs[i];
+        const acc = accuracies[i];
+
+        const xBin = findBin(gap, xBins);
+        const yBin = findBin(semDiff, yBins);
+        if (xBin >= 0 && yBin >= 0) {
+          sumMatrix[yBin][xBin] += acc;
+          countMatrix[yBin][xBin] += 1;
+        }
+      }
+
+      // Calculate average accuracy for each bin
+      for (let yi = 0; yi < yQuantiles; yi++) {
+        for (let xi = 0; xi < xQuantiles; xi++) {
+          if (countMatrix[yi][xi] > 0) {
+            heatmapMatrix[yi][xi] = sumMatrix[yi][xi] / countMatrix[yi][xi];
+          } else {
+            heatmapMatrix[yi][xi] = null;  // No data for this bin
+          }
+        }
+      }
+
+      // Prepare labels for axes: use bin midpoints for visual reference
+      const xLabels = [];
+      for (let i = 0; i < xQuantiles; i++) {
+        xLabels.push(((xBins[i] + xBins[i+1]) / 2).toFixed(1));
+      }
+      const yLabels = [];
+      for (let j = 0; j < yQuantiles; j++) {
+        yLabels.push(((yBins[j] + yBins[j+1]) / 2).toFixed(2));
+      }
+
+      // Create heatmap trace
+      const heatmapData = [{
+        z: heatmapMatrix,
+        x: xLabels,
+        y: yLabels,
+        type: 'heatmap',
+        colorscale: 'YlGnBu',
+        colorbar: { title: 'Avg Accuracy', titleside: 'right' }
+      }];
+
+      const layout = {
+        title: 'Average Accuracy Heatmap',
+        xaxis: { title: 'Gap Duration (ms) - Quantile Midpoints' },
+        yaxis: { title: 'Relative Difference (semitones) - Quantile Midpoints' }
+      };
+
+      Plotly.newPlot('heatmap', heatmapData, layout);
+    }
+
+    document.getElementById("updateHeatmap").addEventListener("click", updateHeatmap);
+  </script>
 </body>
 </html>
