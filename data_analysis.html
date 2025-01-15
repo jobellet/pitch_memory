@@ -3,120 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Experiment Data Analysis</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <title>Data Analysis</title>
+    <link rel="stylesheet" href="style.css">
+    <script defer src="main.js"></script>
 </head>
 <body>
-    <h2>Upload Your Experiment JSON File</h2>
-    <input type="file" id="fileInput">
-    <div id="charts">
-        <h3>Histogram of log10(Relative Difference in Semitones)</h3>
-        <canvas id="histogramChart"></canvas>
-
-        <h3>Heatmap of Mean Accuracy</h3>
-        <div id="heatmap"></div>
-
-        <h3>Timecourse of Relative Accuracy</h3>
-        <canvas id="timecourseChart"></canvas>
-
-        <h3>Running Window Accuracy (200ms)</h3>
-        <div id="runningWindowChart"></div>
-
-        <h3>log10(Gap Duration) Over Trials</h3>
-        <canvas id="log10GapChart"></canvas>
+    <h1>Data Analysis Visualization</h1>
+    
+    <label for="visualization-select">Choose a visualization:</label>
+    <select id="visualization-select" onchange="updateVisualization()">
+        <option value="chart1">Chart 1</option>
+        <option value="chart2">Chart 2</option>
+        <option value="chart3">Chart 3</option>
+    </select>
+    
+    <div id="visualization-container">
+        <canvas id="chart1" class="chart"></canvas>
+        <canvas id="chart2" class="chart" style="display:none;"></canvas>
+        <canvas id="chart3" class="chart" style="display:none;"></canvas>
     </div>
-
+    
     <script>
-        document.getElementById('fileInput').addEventListener('change', function(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = JSON.parse(e.target.result);
-                processData(data);
-            };
-            reader.readAsText(file);
-        });
-
-        function processData(data) {
-            const gapDurations = data.map(d => parseFloat(d.gapDurationMs));
-            const relativeDiffSemitones = data.map(d => parseFloat(d.relativeDiffSemitones));
-            const correctness = data.map(d => d.correctness ? 1 : 0);
-            const log10GapDurations = gapDurations.map(d => Math.log10(d));
-            const log10RelativeDiff = relativeDiffSemitones.map(d => Math.log10(d));
-
-            // Histogram of log10(Relative Difference in Semitones)
-            new Chart(document.getElementById("histogramChart"), {
-                type: "bar",
-                data: {
-                    labels: log10RelativeDiff,
-                    datasets: [{ label: "log10(Relative Diff Semitones)", data: log10RelativeDiff, backgroundColor: "blue" }]
-                },
-                options: { responsive: true }
-            });
-
-            // Heatmap of Mean Accuracy
-            const heatmapData = [];
-            for (let i = 0; i < gapDurations.length; i++) {
-                heatmapData.push({ x: log10RelativeDiff[i], y: log10GapDurations[i], z: correctness[i] });
-            }
-            Plotly.newPlot('heatmap', [{
-                x: heatmapData.map(d => d.x),
-                y: heatmapData.map(d => d.y),
-                z: heatmapData.map(d => d.z),
-                type: 'heatmap',
-                colorscale: 'Blues'
-            }]);
-
-            // Timecourse of Relative Accuracy
-            const meanAccuracy = correctness.reduce((a, b) => a + b, 0) / correctness.length;
-            const relativeAccuracy = correctness.map(a => a - meanAccuracy);
-            new Chart(document.getElementById("timecourseChart"), {
-                type: "line",
-                data: {
-                    labels: gapDurations,
-                    datasets: [{ label: "Relative Accuracy", data: relativeAccuracy, borderColor: "red", fill: false }]
-                },
-                options: { responsive: true }
-            });
-
-            // Running Window Accuracy (200ms)
-            let windowSize = 200;
-            let runningMeans = [], runningTimes = [], runningErrors = [];
-            for (let i = 0; i < gapDurations.length; i++) {
-                let minTime = gapDurations[i] - windowSize / 2;
-                let maxTime = gapDurations[i] + windowSize / 2;
-                let windowData = correctness.filter((_, idx) => gapDurations[idx] >= minTime && gapDurations[idx] <= maxTime);
-                if (windowData.length > 1) {
-                    runningMeans.push(windowData.reduce((a, b) => a + b, 0) / windowData.length);
-                    runningErrors.push(Math.sqrt(windowData.length) / windowData.length);
-                    runningTimes.push(gapDurations[i]);
-                }
-            }
-            const runningWindowTrace = {
-                x: runningTimes,
-                y: runningMeans,
-                mode: "lines+markers",
-                name: "Running Mean",
-                error_y: {
-                    type: "data",
-                    array: runningErrors,
-                    visible: true
-                }
-            };
-            Plotly.newPlot('runningWindowChart', [runningWindowTrace], { title: "Running Window Accuracy (200ms)" });
-
-            // log10(Gap Duration) Over Trials
-            new Chart(document.getElementById("log10GapChart"), {
-                type: "line",
-                data: {
-                    labels: gapDurations.map((_, i) => i),
-                    datasets: [{ label: "log10(Gap Duration)", data: log10GapDurations, borderColor: "green", fill: false }]
-                },
-                options: { responsive: true }
-            });
+        function updateVisualization() {
+            const selectedValue = document.getElementById('visualization-select').value;
+            const charts = document.querySelectorAll('.chart');
+            charts.forEach(chart => chart.style.display = 'none');
+            document.getElementById(selectedValue).style.display = 'block';
         }
     </script>
 </body>
