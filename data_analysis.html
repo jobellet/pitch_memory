@@ -10,6 +10,7 @@
     #controls { text-align: center; margin-bottom: 20px; }
     #heatmap { width: 80%; margin: auto; }
     label { margin: 0 10px; }
+    #uploadBtn { margin-left: 20px; }
   </style>
 </head>
 <body>
@@ -24,21 +25,54 @@
       <input type="number" id="yQuantiles" value="4" min="1" max="20" />
     </label>
     <button id="updateHeatmap">Update Heatmap</button>
+    <button id="uploadBtn">Upload JSON</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none;" />
   </div>
   <div id="heatmap"></div>
 
   <script>
     let experimentData = [];
 
-    // Load JSON data
-    fetch("experiment_data.json")  // Replace with the correct path to your JSON file
+    // Function to process and load new JSON data
+    function processUploadedData(file) {
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const loadedData = JSON.parse(evt.target.result);
+          if (Array.isArray(loadedData)) {
+            experimentData = loadedData;
+            updateHeatmap(); // Update heatmap with new data
+          } else {
+            alert("Invalid JSON format: Expected an array.");
+          }
+        } catch(err) {
+          alert("Error parsing JSON: " + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Trigger file input when upload button is clicked
+    document.getElementById("uploadBtn").addEventListener("click", () => {
+      document.getElementById("fileInput").click();
+    });
+
+    // Handle file selection
+    document.getElementById("fileInput").addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        processUploadedData(file);
+      }
+    });
+
+    // Load default JSON data initially (if available) and render heatmap
+    fetch("experiment_data.json")  // Replace with your default JSON file path if needed
       .then(response => response.json())
       .then(data => {
         experimentData = data;
-        // Initial heatmap rendering with default quantiles
         updateHeatmap();
       })
-      .catch(err => console.error("Error loading data:", err));
+      .catch(err => console.error("Error loading default data:", err));
 
     // Utility: Compute quantile boundaries given sorted array and number of quantiles
     function computeQuantileBins(sortedValues, quantiles) {
@@ -62,6 +96,11 @@
       const xQuantiles = parseInt(document.getElementById("xQuantiles").value) || 4;
       const yQuantiles = parseInt(document.getElementById("yQuantiles").value) || 4;
 
+      if (!experimentData.length) {
+        alert("No data available to display.");
+        return;
+      }
+
       // Extract gap durations and semitone differences from data
       const gapDurations = experimentData.map(d => parseFloat(d.gapDurationMs));
       const semitoneDiffs = experimentData.map(d => parseFloat(d.relativeDiffSemitones));
@@ -75,11 +114,9 @@
       const xBins = computeQuantileBins(sortedGaps, xQuantiles);
       const yBins = computeQuantileBins(sortedSemitones, yQuantiles);
 
-      // Initialize a 2D array for averaging accuracies in each bin
+      // Initialize arrays for averaging accuracies in each bin
       let heatmapMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(null));
       let countMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
-
-      // Create 2D arrays to accumulate sum of accuracies and counts for each bin
       let sumMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
 
       // Function to find bin index given value and bin boundaries
@@ -117,7 +154,7 @@
         }
       }
 
-      // Prepare labels for axes: use bin midpoints for visual reference
+      // Prepare labels for axes using bin midpoints
       const xLabels = [];
       for (let i = 0; i < xQuantiles; i++) {
         xLabels.push(((xBins[i] + xBins[i+1]) / 2).toFixed(1));
@@ -127,7 +164,7 @@
         yLabels.push(((yBins[j] + yBins[j+1]) / 2).toFixed(2));
       }
 
-      // Create heatmap trace
+      // Create and plot heatmap trace
       const heatmapData = [{
         z: heatmapMatrix,
         x: xLabels,
