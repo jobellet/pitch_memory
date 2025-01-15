@@ -12,7 +12,7 @@ let audioContext;
 const TONE_DURATION = 0.25;
 const MIN_BASE_FREQ = 220;
 const MAX_BASE_FREQ = 880;
-const MIN_GAP_MS    = 250;
+const MIN_GAP_MS    = 1;
 const MAX_GAP_MS    = 2000;
 
 // Default sampling range before 50 real trials
