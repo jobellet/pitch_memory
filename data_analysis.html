@@ -2,69 +2,69 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pitch Memory Heatmap Visualization with Filters</title>
+  <title>Pitch Memory Dual Heatmap Visualization</title>
   <script src="https://cdn.plot.ly/plotly-2.16.1.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h1 { text-align: center; }
-    #controls { text-align: center; margin-bottom: 20px; }
-    #heatmap { width: 80%; margin: auto; }
-    .control-group { margin: 10px 0; }
-    label { margin: 0 10px; }
+    .section { text-align: center; margin-bottom: 20px; }
+    #heatmap, #heatmap_rt { width: 80%; margin: auto; margin-bottom: 40px; }
+    .quantile-controls label, .filter-group label { margin: 0 10px; }
+    .filter-group { display: flex; flex-wrap: wrap; justify-content: center; margin: 10px 0; }
+    .filter-item { margin: 5px 10px; }
     input[type="number"] { width: 80px; }
+    input[type="text"] { width: 70px; }
   </style>
 </head>
 <body>
-  <h1>Average Accuracy Heatmap</h1>
+  <h1>Pitch Memory Dual Heatmap Visualization</h1>
   
-  <div id="controls">
-    <div class="control-group">
-      <label>
-        X-axis Quantiles (Gap Duration):
-        <input type="number" id="xQuantiles" value="4" min="1" max="20" />
-      </label>
-      <label>
-        Y-axis Quantiles (Log₁₀ Semitone Diff):
-        <input type="number" id="yQuantiles" value="4" min="1" max="20" />
-      </label>
-      <button id="updateHeatmap">Update Heatmap</button>
+  <div class="section quantile-controls">
+    <label>
+      X-axis Quantiles (Gap Duration):
+      <input type="number" id="xQuantiles" value="4" min="1" max="20" />
+    </label>
+    <label>
+      Y-axis Quantiles (Log₁₀ Semitone Diff):
+      <input type="number" id="yQuantiles" value="4" min="1" max="20" />
+    </label>
+    <button id="updateHeatmap">Update Heatmaps</button>
+    <button id="uploadBtn">Upload JSON</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none;" />
+  </div>
+  
+  <div class="section filter-group">
+    <div class="filter-item">
+      <strong>gapDurationMs</strong><br>
+      Lower: <input type="text" id="filter_gapDurationMs_lower" placeholder="none" /><br>
+      Upper: <input type="text" id="filter_gapDurationMs_upper" placeholder="none" />
     </div>
-    
-    <div class="control-group">
-      <button id="uploadBtn">Upload JSON</button>
-      <input type="file" id="fileInput" accept=".json" style="display:none;" />
+    <div class="filter-item">
+      <strong>relativeDiffSemitones</strong><br>
+      Lower: <input type="text" id="filter_relativeDiffSemitones_lower" placeholder="none" /><br>
+      Upper: <input type="text" id="filter_relativeDiffSemitones_upper" placeholder="none" />
     </div>
-    
-    <div class="control-group">
-      <label>Filter Variable:</label>
-      <select id="filterVariable">
-        <option value="">--Select--</option>
-        <option value="gapDurationMs">Gap Duration (ms)</option>
-        <option value="relativeDiffSemitones">Relative Diff. (semitones)</option>
-        <option value="correctness">Correctness</option>
-        <option value="reactionTimeMs">Reaction Time (ms)</option>
-        <!-- Add more options as needed -->
-      </select>
-      
-      <label>
-        Lower Bound:
-        <input type="text" id="lowerBound" placeholder="none" />
-      </label>
-      <label>
-        Upper Bound:
-        <input type="text" id="upperBound" placeholder="none" />
-      </label>
-      <button id="applyFilter">Apply Filter</button>
+    <div class="filter-item">
+      <strong>correctness</strong><br>
+      Lower: <input type="text" id="filter_correctness_lower" placeholder="none" /><br>
+      Upper: <input type="text" id="filter_correctness_upper" placeholder="none" />
     </div>
+    <div class="filter-item">
+      <strong>reactionTimeMs</strong><br>
+      Lower: <input type="text" id="filter_reactionTimeMs_lower" placeholder="none" /><br>
+      Upper: <input type="text" id="filter_reactionTimeMs_upper" placeholder="none" />
+    </div>
+    <button id="applyFilter">Apply Filters</button>
   </div>
   
   <div id="heatmap"></div>
+  <div id="heatmap_rt"></div>
 
   <script>
     let experimentData = [];
     let filteredData = [];
 
-    // Function to process and load new JSON data
+    // File upload handling
     function processUploadedData(file) {
       const reader = new FileReader();
       reader.onload = function(evt) {
@@ -72,8 +72,8 @@
           const loadedData = JSON.parse(evt.target.result);
           if (Array.isArray(loadedData)) {
             experimentData = loadedData;
-            filteredData = [...experimentData]; // reset filter
-            updateHeatmap();
+            filteredData = [...experimentData];
+            updateHeatmaps();
           } else {
             alert("Invalid JSON format: Expected an array.");
           }
@@ -84,12 +84,10 @@
       reader.readAsText(file);
     }
 
-    // Trigger file input when upload button is clicked
     document.getElementById("uploadBtn").addEventListener("click", () => {
       document.getElementById("fileInput").click();
     });
 
-    // Handle file selection
     document.getElementById("fileInput").addEventListener("change", (event) => {
       const file = event.target.files[0];
       if (file) {
@@ -98,16 +96,16 @@
     });
 
     // Load default JSON data initially (if available)
-    fetch("experiment_data.json")  // Replace with your default JSON file path if needed
+    fetch("experiment_data.json")  // Replace with default JSON path if necessary
       .then(response => response.json())
       .then(data => {
         experimentData = data;
         filteredData = [...experimentData];
-        updateHeatmap();
+        updateHeatmaps();
       })
       .catch(err => console.error("Error loading default data:", err));
 
-    // Utility: Compute quantile boundaries given sorted array and number of quantiles
+    // Utility function to compute quantile bins
     function computeQuantileBins(sortedValues, quantiles) {
       const bins = [];
       for (let i = 0; i <= quantiles; i++) {
@@ -124,68 +122,67 @@
       return bins;
     }
 
-    // Apply exclusion filter based on user settings
-    function applyUserFilter() {
-      const variable = document.getElementById("filterVariable").value;
-      const lowerVal = document.getElementById("lowerBound").value.trim();
-      const upperVal = document.getElementById("upperBound").value.trim();
-
-      // If no variable selected, do nothing
-      if (!variable) return;
-
-      const lowerBound = lowerVal === "" || lowerVal.toLowerCase() === "none" ? -Infinity : parseFloat(lowerVal);
-      const upperBound = upperVal === "" || upperVal.toLowerCase() === "none" ? Infinity : parseFloat(upperVal);
-
-      // Filter experimentData based on bounds for the chosen variable
+    // Apply filters for all variables
+    function applyUserFilters() {
+      const vars = ["gapDurationMs", "relativeDiffSemitones", "correctness", "reactionTimeMs"];
       filteredData = experimentData.filter(d => {
-        let value = parseFloat(d[variable]);
-        if (isNaN(value)) {
-          // If value is non-numeric (e.g., correctness as boolean), handle separately
-          if (typeof d[variable] === "boolean") {
-            value = d[variable] ? 1 : 0;
-          } else {
-            return true; // skip filtering for non-numeric types if not handled
+        for (let v of vars) {
+          const lowerInput = document.getElementById(`filter_${v}_lower`).value.trim();
+          const upperInput = document.getElementById(`filter_${v}_upper`).value.trim();
+          const lowerBound = (lowerInput === "" || lowerInput.toLowerCase() === "none") ? -Infinity : parseFloat(lowerInput);
+          const upperBound = (upperInput === "" || upperInput.toLowerCase() === "none") ? Infinity : parseFloat(upperInput);
+          let value = parseFloat(d[v]);
+          if (isNaN(value)) {
+            if (typeof d[v] === "boolean") {
+              value = d[v] ? 1 : 0;
+            } else {
+              continue; // Skip filtering non-numeric if not handled
+            }
+          }
+          if (value < lowerBound || value > upperBound) {
+            return false;
           }
         }
-        return value >= lowerBound && value <= upperBound;
+        return true;
       });
-
-      updateHeatmap();
+      updateHeatmaps();
     }
 
-    document.getElementById("applyFilter").addEventListener("click", applyUserFilter);
+    document.getElementById("applyFilter").addEventListener("click", applyUserFilters);
 
-    // Main function to update the heatmap based on quantiles and filteredData
-    function updateHeatmap() {
+    function updateHeatmaps() {
       const xQuantiles = parseInt(document.getElementById("xQuantiles").value) || 4;
       const yQuantiles = parseInt(document.getElementById("yQuantiles").value) || 4;
 
-      // Use filteredData for analysis
       if (!filteredData.length) {
         alert("No data available to display after filtering.");
         return;
       }
 
-      // Extract gap durations and semitone differences from filtered data
+      // Extract values for quantile computation
       const gapDurations = filteredData.map(d => parseFloat(d.gapDurationMs));
-      // Use log10 of relativeDiffSemitones for y-axis
-      const semitoneLogs = filteredData.map(d => Math.log10(parseFloat(d.relativeDiffSemitones) || 0.00001));
+      const semitoneDiffs = filteredData.map(d => parseFloat(d.relativeDiffSemitones) || 0.00001);
       const accuracies = filteredData.map(d => d.correctness ? 1 : 0);
+      const reactionTimes = filteredData.map(d => parseFloat(d.reactionTimeMs) || 0);
 
-      // Sort arrays for quantile computation
+      // Compute log10 for semitones
+      const semitoneLogs = semitoneDiffs.map(val => Math.log10(val));
+
+      // Sort arrays for binning
       const sortedGaps = [...gapDurations].sort((a,b) => a-b);
       const sortedSemLogs = [...semitoneLogs].sort((a,b) => a-b);
 
-      // Compute quantile boundaries for x and y axes
+      // Compute quantile bins
       const xBins = computeQuantileBins(sortedGaps, xQuantiles);
       const yBins = computeQuantileBins(sortedSemLogs, yQuantiles);
 
-      // Initialize arrays for averaging accuracies in each bin
-      let heatmapMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(null));
+      // Initialize matrices for accuracy and reaction time heatmaps
+      let accuracyMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(null));
+      let rtMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(null));
       let countMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
-      let sumMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
+      let accSumMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
+      let rtSumMatrix = Array.from({length: yQuantiles}, () => Array(xQuantiles).fill(0));
 
-      // Function to find bin index given value and bin boundaries
       function findBin(value, bins) {
         for (let i = 0; i < bins.length - 1; i++) {
           if (value >= bins[i] && value <= bins[i+1]) {
@@ -195,65 +192,80 @@
         return bins.length - 2;
       }
 
-      // Assign each data point to a bin and accumulate accuracy sums
+      // Assign data points to bins and accumulate sums for accuracy and RT
       for (let i = 0; i < filteredData.length; i++) {
         const gap = gapDurations[i];
         const semLog = semitoneLogs[i];
         const acc = accuracies[i];
+        const rt = reactionTimes[i];
 
         const xBin = findBin(gap, xBins);
         const yBin = findBin(semLog, yBins);
         if (xBin >= 0 && yBin >= 0) {
-          sumMatrix[yBin][xBin] += acc;
+          accSumMatrix[yBin][xBin] += acc;
+          rtSumMatrix[yBin][xBin] += rt;
           countMatrix[yBin][xBin] += 1;
         }
       }
 
-      // Calculate average accuracy for each bin
+      // Compute averages for each bin
       for (let yi = 0; yi < yQuantiles; yi++) {
         for (let xi = 0; xi < xQuantiles; xi++) {
           if (countMatrix[yi][xi] > 0) {
-            heatmapMatrix[yi][xi] = sumMatrix[yi][xi] / countMatrix[yi][xi];
+            accuracyMatrix[yi][xi] = accSumMatrix[yi][xi] / countMatrix[yi][xi];
+            rtMatrix[yi][xi] = rtSumMatrix[yi][xi] / countMatrix[yi][xi];
           } else {
-            heatmapMatrix[yi][xi] = null;
+            accuracyMatrix[yi][xi] = null;
+            rtMatrix[yi][xi] = null;
           }
         }
       }
 
-      // Prepare labels for axes using bin midpoints
+      // Prepare labels using bin midpoints
       const xLabels = [];
       for (let i = 0; i < xQuantiles; i++) {
         xLabels.push(((xBins[i] + xBins[i+1]) / 2).toFixed(1));
       }
       const yLabels = [];
       for (let j = 0; j < yQuantiles; j++) {
-        // Convert midpoint back from log scale for labeling if desired
-        const midpoint = (yBins[j] + yBins[j+1]) / 2;
-        yLabels.push(midpoint.toFixed(2));
+        // Display log₁₀ midpoints
+        yLabels.push(((yBins[j] + yBins[j+1]) / 2).toFixed(2));
       }
 
-      // Create and plot heatmap trace
-      const heatmapData = [{
-        z: heatmapMatrix,
+      // Plot Accuracy Heatmap
+      const heatmapDataAcc = [{
+        z: accuracyMatrix,
         x: xLabels,
         y: yLabels,
         type: 'heatmap',
         colorscale: 'YlGnBu',
         colorbar: { title: 'Avg Accuracy', titleside: 'right' }
       }];
-
-      const layout = {
+      const layoutAcc = {
         title: 'Average Accuracy Heatmap',
         xaxis: { title: 'Gap Duration (ms) - Quantile Midpoints' },
-        yaxis: { 
-          title: 'log₁₀(Relative Difference) - Quantile Midpoints' 
-        }
+        yaxis: { title: 'log₁₀(Relative Diff) - Quantile Midpoints' }
       };
+      Plotly.newPlot('heatmap', heatmapDataAcc, layoutAcc);
 
-      Plotly.newPlot('heatmap', heatmapData, layout);
+      // Plot Reaction Time Heatmap
+      const heatmapDataRT = [{
+        z: rtMatrix,
+        x: xLabels,
+        y: yLabels,
+        type: 'heatmap',
+        colorscale: 'YlOrRd',
+        colorbar: { title: 'Avg Reaction Time (ms)', titleside: 'right' }
+      }];
+      const layoutRT = {
+        title: 'Average Reaction Time Heatmap',
+        xaxis: { title: 'Gap Duration (ms) - Quantile Midpoints' },
+        yaxis: { title: 'log₁₀(Relative Diff) - Quantile Midpoints' }
+      };
+      Plotly.newPlot('heatmap_rt', heatmapDataRT, layoutRT);
     }
 
-    document.getElementById("updateHeatmap").addEventListener("click", updateHeatmap);
+    document.getElementById("updateHeatmap").addEventListener("click", updateHeatmaps);
   </script>
 </body>
 </html>
